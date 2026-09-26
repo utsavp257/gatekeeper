@@ -8,7 +8,7 @@ ROW = {"_id": "30882", "source": "Non-SDN Chinese Military-Industrial Complex Co
 
 def test_parses_entity_row():
     d = parse_csl_row(ROW)
-    assert d["_id"] == "csl-30882"
+    assert d["_id"] == "csl-CMIC-30882"
     assert d["source_list"] == "CMIC"
     assert d["alt_names"] == ["CHINA TELECOM", "CHINA TELECOM CORP LTD"]
     assert d["country"] == "CN"
@@ -29,3 +29,9 @@ def test_keeps_blank_type_entity_list_rows():
 
 def test_country_none_when_no_code():
     assert parse_csl_row(dict(ROW, addresses="Moscow"))["country"] is None
+
+
+def test_same_row_id_on_two_lists_gets_distinct_ids():
+    a = parse_csl_row(dict(ROW, source="Specially Designated Nationals (SDN) - Treasury Department"))
+    b = parse_csl_row(dict(ROW, source="Sectoral Sanctions Identifications List (SSI) - Treasury Department"))
+    assert a["_id"] != b["_id"]
