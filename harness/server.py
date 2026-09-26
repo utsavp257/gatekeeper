@@ -44,6 +44,12 @@ def _start_agents() -> None:
         AGENTS[name] = AgentInstance(db, name).start()
 
 
+from harness.ui_api import build_router  # noqa: E402
+
+UI = build_router(db, AGENTS)
+app.include_router(UI)
+
+
 class Vendor(BaseModel):
     name: str
     country: str | None = None
@@ -172,3 +178,8 @@ def job_status(job_id: str) -> dict:
 def JSON_SAFE(obj):
     import json
     return json.loads(json.dumps(obj, default=str))
+
+
+@app.post("/demo/hotswap", dependencies=[Depends(require_token)])
+def demo_hotswap() -> dict:
+    return UI.demo_hotswap()
