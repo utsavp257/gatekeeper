@@ -246,7 +246,8 @@ def step(db) -> dict:
 def _finish(db, doc: dict, promoted: bool, reason: str) -> dict:
     status = "champion" if promoted else "rejected"
     emb = _embed([f"{doc['rationale']} | diff {json.dumps(doc['diff'])} | outcome {status}: {reason}"])[0]
-    db.genomes.update_one({"_id": doc["_id"]}, {"$set": {"status": status, "gate_reason": reason, "embedding": emb}})
+    db.genomes.update_one({"_id": doc["_id"]}, {"$set": {"status": status, "gate_reason": reason, "embedding": emb,
+                                                        "decided_at": datetime.now(timezone.utc)}})
     _event(db, "promotion" if promoted else "rejection", doc["_id"],
            {"candidate": doc["_id"], "parent": doc["parent"], "reason": reason, "rationale": doc["rationale"]})
     g = db.genomes.find_one({"_id": doc["_id"]}, {"scores": 1})

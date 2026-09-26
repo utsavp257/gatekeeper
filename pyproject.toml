@@ -3,11 +3,13 @@ name = "harness"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.141.1",
     "pymongo[srv]>=4.8",
     "python-dotenv>=1.0",
     "rapidfuzz>=3.14.6",
     "strands-agents[openai]>=1.57.1",
     "tavily-python>=0.8.4",
+    "uvicorn[standard]>=0.54.0",
     "voyageai>=0.5.0",
 ]
 
