@@ -405,7 +405,28 @@ async function loadPresets() {
     f.amount_usd.value = p.request.amount_usd; f.justification.value = p.request.justification;
   };
 }
+/* ---------- recording tours: /ui?tour=chain | live | screen (hands-free shots timed to the voiceover) ---------- */
+function glide(fromEl, toEl, ms) {
+  const y0 = fromEl.getBoundingClientRect().top + scrollY - 16;
+  const y1 = toEl.getBoundingClientRect().top + scrollY - innerHeight + 40;
+  scrollTo(0, y0);
+  return new Promise((done) => setTimeout(() => {
+    const t0 = performance.now();
+    const step = (t) => { const k = Math.min((t - t0) / ms, 1); scrollTo(0, y0 + (y1 - y0) * (k < .5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2)); k < 1 ? requestAnimationFrame(step) : done(); };
+    requestAnimationFrame(step);
+  }, 1200));
+}
+async function tour(kind) {
+  await new Promise((r) => setTimeout(r, 1500));  // let data load
+  if (kind === "chain") await glide($("#h-chain"), $("#h-live"), 15000);
+  if (kind === "live") { $("#h-live").scrollIntoView(); scrollBy(0, -16); setTimeout(() => $("#btn-swap").click(), 2500); }
+  if (kind === "screen") { $("#h-screen").scrollIntoView(); scrollBy(0, -16); }
+  if (kind === "hero") scrollTo(0, 0);
+}
+const TOUR = new URLSearchParams(location.search).get("tour");
+
 loadOverview(); loadEvents(); loadPresets();
+if (TOUR) tour(TOUR);
 setInterval(loadOverview, 5000); setInterval(loadEvents, 2000);
 </script>
 </body>
