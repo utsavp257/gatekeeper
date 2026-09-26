@@ -228,7 +228,11 @@ Rejected candidates are kept with `status: "rejected"`, so the critic never re-p
   - `GET /health`: returns `{champion_genome_id, agents: {agent-a, agent-b}}`
   - `POST /screen`: takes `{agent_instance, genome_id?, vendor: {name, country, lei, website}, request: {amount_usd, justification}}`. `genome_id` screens with a specific genome, e.g. `g-0001` for the before/after demo.
   - `POST /redteam/attack`: takes `{family, target_agent, payload?}`
-  - `POST /evolve/step`, `POST /immune/step`: these take minutes, so show a spinner.
+  - `POST /evolve/step`, `POST /immune/step`: these return **202** `{job_id, status: "running"}` at once and run in the background for 5–15 minutes. Poll `GET /jobs/{job_id}`, which returns `{status: running|done|error, result, error}`, and watch the `promotion`, `rejection` and `hot_swap` events over SSE. A **409** means a step is already running.
+- **Auth:** every `POST` needs the header `x-harness-token: <HARNESS_API_TOKEN>`. `GET /health` and `GET /jobs/*` are open. The token is server-side only: keep it in the Vercel env and never ship it to the browser.
+- **Public URL for Vercel:** the harness runs on Utsav's laptop behind a Cloudflare quick tunnel. The URL changes if the tunnel restarts, and Utsav shares it privately.
+- **Final numbers** for the dashboard or README live in the **`reports`** collection. Use the newest document where `note` starts with `FINAL`. Its `rows.<genome>.catch_rate`, `false_block_rate` and `injection_catch` are each `{mean, min, max}`.
+- **`agents.last_heartbeat`** is refreshed every 10s while the server runs, so it's safe to show liveness.
 
 ---
 
