@@ -24,7 +24,11 @@ and will not be copied into the repository as product code.
 - The screening form calls the FastAPI harness and renders the decision, memo,
   blocked actions, cost, and trace.
 - Evolve, immune, and red-team actions call the current harness endpoints and
-  expose running, success, conflict, and failure states.
+  expose queued/running, success, conflict, and failure states without holding
+  a browser request open for a 5–15 minute harness step.
+- Protected actions authenticate server-to-server with `HARNESS_API_TOKEN`;
+  the token never reaches a browser response or bundle.
+- Agent liveness is based on the 10-second `agents.last_heartbeat` updates.
 - The application deploys to Vercel with secrets kept server-side.
 - Tests cover contract normalization, missing data, state transitions, and the
   primary user flows. The Python suite remains green.
@@ -50,7 +54,9 @@ and will not be copied into the repository as product code.
    - optional genome override for the before/after demo
    - decision, memo, blocked actions, cost, and trace-step rendering
 4. Next.js server routes for Atlas reads, event streaming, and FastAPI proxying.
-5. Vercel configuration and dashboard-specific environment documentation.
+5. The newest `reports` document whose note starts with `FINAL`, used for the
+   honest repeated-run mean/range summary.
+6. Vercel configuration and dashboard-specific environment documentation.
 
 ### Excluded
 
@@ -69,9 +75,10 @@ The dashboard is a standalone Next.js App Router application under
 
 ```text
 Browser
-  ├─ GET /api/dashboard ──► Next.js server ──► MongoDB Atlas
-  ├─ GET /api/events    ──► Next.js SSE route ──► Atlas change stream
-  └─ POST /api/harness/* ─► Next.js proxy ──► FastAPI harness
+  ├─ GET /api/dashboard      ──► Next.js server ──► MongoDB Atlas
+  ├─ GET /api/events         ──► Next.js SSE route ──► Atlas change stream
+  ├─ POST /api/harness/*     ──► Next.js proxy + token ──► FastAPI harness
+  └─ GET /api/harness/jobs/* ──► Next.js proxy ──► FastAPI job status
 ```
 
 The server data layer owns MongoDB connection reuse, query projections, BSON
@@ -79,11 +86,12 @@ serialization, and contract normalization. UI components consume dashboard
 view models rather than raw MongoDB documents. This keeps optional or
 historical fields from leaking defensive checks throughout the component tree.
 
-The FastAPI proxy is configurable with `HARNESS_API_URL`. A local dashboard can
-use `http://localhost:8000`; a Vercel deployment requires a network-reachable
-harness URL. Atlas-backed read-only views remain usable when the harness is
-offline, while mutation controls clearly report that live actions are
-unavailable.
+The FastAPI proxy is configurable with `HARNESS_API_URL` and adds the
+server-only `HARNESS_API_TOKEN` to protected POST requests. A local dashboard
+can use `http://localhost:8000`; a Vercel deployment requires Utsav's current
+network-reachable Cloudflare tunnel URL. Atlas-backed read-only views remain
+usable when the harness is offline, while mutation controls clearly report
+that live actions are unavailable.
 
 ## Server interfaces
 
@@ -96,6 +104,7 @@ type DashboardSnapshot = {
   generatedAt: string;
   genomes: GenomeSummary[];
   reference: GenomeSummary | null;
+  finalReport: FinalReport | null;
   agents: AgentSummary[];
   recentEvents: GatekeeperEvent[];
 };
@@ -107,6 +116,7 @@ The Atlas queries:
 - project out `embedding` and `critic_raw`
 - separate `status: "reference"` from lineage genomes
 - read both agent documents ordered by `_id`
+- read the newest report where `note` starts with `FINAL`
 - read the newest 100 events and return them oldest-to-newest for display
 
 ### `GET /api/traces/:id`
@@ -129,11 +139,15 @@ so missed events do not leave the UI stale.
 - `POST /api/harness/redteam` → `POST /redteam/attack`
 - `POST /api/harness/evolve` → `POST /evolve/step`
 - `POST /api/harness/immune` → `POST /immune/step`
+- `GET /api/harness/jobs/:id` → `GET /jobs/:id`
 
 The proxy preserves the harness status code, returns a small normalized error,
-and applies an explicit timeout. Evolve and immune calls allow a longer timeout
-than screening because the handoff states they can take minutes. A 409 is shown
-as “another harness step is already running,” not as a generic crash.
+and applies an explicit timeout. Every protected POST includes
+`x-harness-token` from the server environment. Evolve and immune return 202
+with `{job_id, status: "running"}`; the browser polls the open job endpoint
+until `done` or `error` while also watching promotion/rejection/hot-swap events.
+A 409 is shown as “another harness step is already running,” not as a generic
+crash.
 
 ## View models and contract handling
 
@@ -145,6 +159,21 @@ type MetricSet = {
   falseBlockRate: number | null;
   injectionBlockRate: number | null;
   costPerCaseUsd: number | null;
+};
+
+type MetricRange = { mean: number; min: number; max: number };
+
+type FinalReport = {
+  createdAt: string;
+  note: string;
+  runs: number;
+  rows: Record<string, {
+    catchRate: MetricRange | null;
+    falseBlockRate: MetricRange | null;
+    injectionCatch: MetricRange | null;
+    costPerCaseUsd: MetricRange | null;
+    n: number;
+  }>;
 };
 
 type GenomeSummary = {
@@ -172,6 +201,7 @@ Rules:
 - Dates become ISO strings at the server boundary.
 - Arbitrary payload text is rendered as text, never injected as HTML.
 - The UI never reads `case_labels`.
+- The final report parser tolerates absent metric ranges and unknown genome ids.
 
 ## Page design
 
@@ -199,15 +229,16 @@ points. The reference genome appears only as a dashed comparison series.
 ### Live Ops
 
 Two equal agent panels create the herd-immunity split screen. Each panel shows
-its current genome, heartbeat freshness, latest decision, blocks, and antibody
-hits. A hot-swap event creates a prominent but non-blocking banner containing
-the old genome, new genome, and latency. Global promotion, rejection, and
-antibody events appear in a shared center timeline rather than being assigned
-to an agent that did not produce them.
+its current genome, heartbeat freshness derived from `last_heartbeat`, latest
+decision, blocks, and antibody hits. A hot-swap event creates a prominent but
+non-blocking banner containing the old genome, new genome, and latency. Global
+promotion, rejection, and antibody events appear in a shared center timeline
+rather than being assigned to an agent that did not produce them.
 
 Controls are intentionally narrow: choose an agent and attack family, launch a
 red-team attack, or run one immune/evolution step. Each control disables only
-while its own request is active and reports the returned identifiers.
+while its own request is active, reports the returned job identifier, and polls
+job status without blocking the event feed.
 
 ### Screen Vendor
 
@@ -240,7 +271,8 @@ but does not submit automatically.
 
 ## Security
 
-- `MONGODB_URI` and `HARNESS_API_URL` are server-only variables.
+- `MONGODB_URI`, `HARNESS_API_URL`, and `HARNESS_API_TOKEN` are server-only variables.
+- `HARNESS_API_TOKEN` is attached only to protected harness POST requests.
 - Atlas reads use explicit projections and limits.
 - No API route exposes `case_labels`, embeddings, or raw critic output.
 - User and event text is escaped by React and is never passed to
@@ -280,11 +312,13 @@ The Vercel project root is `/dashboard`. Required variables are:
 - `MONGODB_URI`
 - `MONGODB_DB=gatekeeper` (optional when using the default)
 - `HARNESS_API_URL`
+- `HARNESS_API_TOKEN`
 
 The deployment must complete even when `HARNESS_API_URL` points to an offline
 backend; only live actions are unavailable. Utsav can run the harness locally
-for development and replace the URL with a tunnel or hosted endpoint for the
-shared Vercel demo.
+for development and replace the URL with his current Cloudflare tunnel for the
+shared Vercel demo. Restarting the quick tunnel requires updating
+`HARNESS_API_URL` in Vercel.
 
 The PR description will identify the collection fields and harness endpoints
 consumed so Person A can review the integration boundary quickly.

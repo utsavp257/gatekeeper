@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Keep all dashboard product code inside `/dashboard`; do not modify `/harness` or its MongoDB contract.
-- Keep `MONGODB_URI` and `HARNESS_API_URL` server-only and never commit `.env*` files other than examples.
+- Keep `MONGODB_URI`, `HARNESS_API_URL`, and `HARNESS_API_TOKEN` server-only and never commit `.env*` files other than examples.
 - Never expose `case_labels`, genome embeddings, or `critic_raw` through a dashboard route.
 - Use real Atlas data and honest empty/error states; do not ship fabricated demo metrics.
 - Treat missing `scores.heldout` as missing data, not zero.
@@ -28,7 +28,7 @@
 1. A rejected genome with train scores but no held-out scores stays in lineage and creates no fake chart point — pinned in Tasks 1 and 3.
 2. Missing or unknown parents produce a stable orphan root instead of breaking lineage — pinned in Task 3.
 3. Replayed or duplicate SSE events do not duplicate the visible feed, and reconnect state never discards prior events — pinned in Task 4.
-4. A slow/offline harness or a 409 step conflict preserves user input and produces a useful message — pinned in Tasks 5 and 6.
+4. A slow/offline harness or a 409 step conflict preserves user input and produces a useful message; protected POSTs include the server token without exposing it to browser responses or GET job polling — pinned in Tasks 5 and 6.
 5. Injection payloads containing HTML-like text render literally and cannot become DOM markup — pinned in Tasks 4 and 6.
 
 ## File map
@@ -39,6 +39,7 @@ dashboard/
     api/dashboard/route.ts           initial Atlas snapshot
     api/events/route.ts              Atlas change-stream SSE
     api/harness/[action]/route.ts    allowlisted FastAPI proxy
+    api/harness/jobs/[id]/route.ts   asynchronous job polling
     api/traces/[id]/route.ts         one normalized trace
     ops/page.tsx                     herd-immunity screen
     screen/page.tsx                  vendor-screening screen
@@ -98,7 +99,7 @@ dashboard/
 
 **Interfaces:**
 - Consumes: MongoDB documents shaped by `HANDOFF.md` §6.
-- Produces: `MetricSet`, `GenomeSummary`, `AgentSummary`, `GatekeeperEvent`, `TraceView`, `DashboardSnapshot`, `normalizeGenome`, `normalizeAgent`, `normalizeEvent`, and `normalizeTrace`.
+- Produces: `MetricSet`, `GenomeSummary`, `FinalReport`, `AgentSummary`, `GatekeeperEvent`, `TraceView`, `DashboardSnapshot`, `normalizeGenome`, `normalizeFinalReport`, `normalizeAgent`, `normalizeEvent`, and `normalizeTrace`.
 
 - [ ] **Step 1: Create the Node/test configuration**
 
@@ -215,7 +216,9 @@ it("normalizes an unknown event without dropping its payload", () => {
 
 Also cover ISO date serialization, absent optional policy fields, antibody
 counts, trace step/blocked arrays, and a BSON-like `_id` whose `toString()`
-returns an identifier.
+returns an identifier. Add a `normalizeFinalReport` fixture with
+`catch_rate`, `false_block_rate`, and `injection_catch` mean/min/max objects,
+plus a row with an absent range.
 
 - [ ] **Step 3: Run the tests and verify RED**
 
@@ -248,8 +251,9 @@ export type GenomeSummary = {
 Implement `normalizeMetricSet(value: unknown): MetricSet | null` so a missing
 object returns `null`, while missing individual numbers become `null`.
 `normalizeGenome` must default display strings/arrays safely without rejecting
-historical documents. Define matching explicit types for agents, events,
-traces, and snapshots in the same file.
+historical documents. Define matching explicit types for final reports, agents,
+events, traces, and snapshots in the same file. `DashboardSnapshot.finalReport`
+is nullable.
 
 - [ ] **Step 5: Run checks and commit**
 
@@ -291,9 +295,11 @@ it("separates the reference genome and orders recent events oldest first", async
   const snapshot = await loadDashboardSnapshot(fakeDb({
     genomes: [referenceGenome, championGenome, rejectedGenome],
     agents: [agentB, agentA],
+    reports: [olderReport, finalReport],
     events: [newerEvent, olderEvent],
   }));
   expect(snapshot.reference?.id).toBe("ref-all-tools");
+  expect(snapshot.finalReport?.rows["g-0005"].catchRate?.mean).toBe(1);
   expect(snapshot.genomes.map((genome) => genome.id)).toEqual(["g-0002", "g-0004"]);
   expect(snapshot.agents.map((agent) => agent.id)).toEqual(["agent-a", "agent-b"]);
   expect(snapshot.recentEvents.map((event) => event.id)).toEqual(["evt-old", "evt-new"]);
@@ -329,7 +335,8 @@ export async function loadTrace(id: string, db?: Db): Promise<TraceView | null>;
 ```
 
 Read genomes sorted by version ascending, agents by `_id` ascending, and the
-latest 100 events by `ts` descending; reverse only the events after
+latest 100 events by `ts` descending. Read the newest report whose `note`
+matches `^FINAL`; normalize it or return `null`. Reverse only the events after
 normalization. Split the reference from lineage genomes after normalization.
 
 - [ ] **Step 4: Write failing route tests**
@@ -430,7 +437,9 @@ expect(screen.getByRole("table", { name: /held-out metric values/i })).toBeVisib
 ```
 
 Click `g-0002` and assert its rationale/diff replace the selected detail. Assert
-the reference appears in chart/table copy but has no lineage-node button.
+the reference appears in chart/table copy but has no lineage-node button. When
+a final report exists, assert the baseline/champion summary uses its repeated-run
+means and ranges rather than a single genome score.
 
 - [ ] **Step 5: Run component tests and verify RED**
 
@@ -445,6 +454,8 @@ non-null values, and a dashed reference line. `MetricTable` exposes the exact
 same numbers in a visually compact table. `LineageTree` renders an SVG edge
 layer plus real `<button>` nodes with status text. `CommandCenter` owns the
 selected genome id and synchronizes chart/tree selection with `GenomeDetail`.
+The report summary is separate from the per-generation chart and labels its
+run count/range so the dashboard does not imply a single deterministic score.
 
 The server page exports `dynamic = "force-dynamic"` and calls
 `loadDashboardSnapshot()` directly. Catch Atlas errors and render a retryable
@@ -568,13 +579,15 @@ git commit -m "feat(dashboard): stream herd-immunity events"
 - Create: `dashboard/lib/harness.test.ts`
 - Create: `dashboard/app/api/harness/[action]/route.ts`
 - Create: `dashboard/app/api/harness/[action]/route.test.ts`
+- Create: `dashboard/app/api/harness/jobs/[id]/route.ts`
+- Create: `dashboard/app/api/harness/jobs/[id]/route.test.ts`
 - Create: `dashboard/components/harness-controls.tsx`
 - Create: `dashboard/components/harness-controls.test.tsx`
 - Modify: `dashboard/components/ops-console.tsx`
 
 **Interfaces:**
-- Consumes: `HARNESS_API_URL` and Task 4 `OpsConsole`.
-- Produces: `HarnessAction = "health" | "screen" | "redteam" | "evolve" | "immune"`, `forwardHarness(action, request, fetcher?)`, allowlisted `/api/harness/[action]`, and `HarnessControls`.
+- Consumes: `HARNESS_API_URL`, `HARNESS_API_TOKEN`, and Task 4 `OpsConsole`.
+- Produces: `HarnessAction = "health" | "screen" | "redteam" | "evolve" | "immune"`, `forwardHarness(action, request, fetcher?)`, `forwardJobStatus(id, fetcher?)`, allowlisted `/api/harness/[action]`, `/api/harness/jobs/[id]`, and `HarnessControls`.
 
 - [ ] **Step 1: Write failing proxy tests**
 
@@ -587,7 +600,9 @@ expect(resolveHarnessAction("unknown")).toBeNull();
 
 Test that `forwardHarness` keeps a backend 409 status and normalized message,
 returns 503 for missing `HARNESS_API_URL`, returns 504 after timeout, and never
-accepts a caller-provided URL.
+accepts a caller-provided URL. With `HARNESS_API_TOKEN=secret`, assert every
+POST fetch receives `x-harness-token: secret`, while health and job-status GETs
+do not include the header. Assert no returned JSON contains the token.
 
 - [ ] **Step 2: Run proxy tests and verify RED**
 
@@ -604,15 +619,17 @@ const ACTIONS = {
   health: { method: "GET", path: "/health", timeoutMs: 10_000 },
   screen: { method: "POST", path: "/screen", timeoutMs: 90_000 },
   redteam: { method: "POST", path: "/redteam/attack", timeoutMs: 90_000 },
-  evolve: { method: "POST", path: "/evolve/step", timeoutMs: 600_000 },
-  immune: { method: "POST", path: "/immune/step", timeoutMs: 600_000 },
+  evolve: { method: "POST", path: "/evolve/step", timeoutMs: 30_000 },
+  immune: { method: "POST", path: "/immune/step", timeoutMs: 30_000 },
 } as const;
 ```
 
 Strip the trailing slash from the configured base, use `AbortSignal.timeout`,
 parse JSON only when available, and return `{ error: string }` for network or
 timeout failures. The dynamic route accepts GET only for health and POST only
-for all other actions.
+for all other actions. `forwardJobStatus` accepts only ids matching
+`/^job-[a-f0-9]{8}$/`, calls `GET /jobs/<id>` without a token, and returns 400
+before fetch for any other value.
 
 - [ ] **Step 4: Write failing control tests**
 
@@ -620,7 +637,10 @@ Select `agent-b`, choose `compliance_preapproval`, click “Launch red-team
 attack,” and assert the request body is
 `{ target_agent: "agent-b", family: "compliance_preapproval" }`. Verify only
 that button disables during its request. For an evolve 409, assert the visible
-message is “Another harness step is already running.”
+message is “Another harness step is already running.” For a 202 response,
+assert the control displays the job id, polls `/api/harness/jobs/<id>`, moves
+from queued to done, and surfaces the returned result. Cover an error job and
+stop polling after a terminal state.
 
 - [ ] **Step 5: Run control tests and verify RED**
 
@@ -631,14 +651,16 @@ Expected: FAIL because `HarnessControls` does not exist.
 - [ ] **Step 6: Implement controls and verify GREEN**
 
 Provide three focused actions: red-team attack, run immune step, run evolution
-step. Keep independent pending/result state per action and rely on the event
-stream for timeline updates. Mount the controls above the split screen.
+step. Keep independent pending/result state per action. Evolve/immune treat the
+202 response as a queued job, poll every two seconds until `done` or `error`,
+and continue relying on the event stream for timeline updates. Clear polling
+timers on unmount. Mount the controls above the split screen.
 
 Run:
 
 ```bash
 cd dashboard
-npm test -- lib/harness.test.ts app/api/harness/[action]/route.test.ts components/harness-controls.test.tsx
+npm test -- lib/harness.test.ts 'app/api/harness/[action]/route.test.ts' 'app/api/harness/jobs/[id]/route.test.ts' components/harness-controls.test.tsx
 npm run typecheck
 npm run lint
 git add dashboard
@@ -753,7 +775,9 @@ amber, red, and cyan. Use a 4/8 px spacing rhythm, 6/10 px radii, tabular
 numbers for metrics, and no gradients. Add `:focus-visible`, reduced-motion,
 empty/error/skeleton styles, chart/lineage layouts, event treatments, and the
 below-900-px stacked layout. The shell polls health at a low frequency and
-labels connection state with text in addition to color.
+labels connection state with text in addition to color. Agent panels derive
+online/stale/offline copy from the server-provided `lastHeartbeat`; a heartbeat
+older than 30 seconds is stale and an absent heartbeat is offline.
 
 Both loading files render the same fixed-height chart/tree and agent-panel
 skeleton regions used by the completed pages, with `aria-label="Loading dashboard"`
@@ -767,6 +791,7 @@ and no animated motion when `prefers-reduced-motion` is set.
 MONGODB_URI=
 MONGODB_DB=gatekeeper
 HARNESS_API_URL=http://localhost:8000
+HARNESS_API_TOKEN=
 ```
 
 `dashboard/vercel.json` is exact and deliberately avoids account-specific
@@ -783,8 +808,11 @@ Export `export const maxDuration = 60` from the SSE route, which gives change-st
 connections a bounded lifetime and lets EventSource reconnect. `dashboard/README.md`
 documents `npm install`, `npm run dev`, required environment variables, local
 FastAPI startup, Vercel root directory `dashboard`, and the requirement for a
-network-reachable harness URL in production. Add one root README paragraph and
-link to the dashboard README without rewriting Utsav’s harness documentation.
+network-reachable harness URL in production. State that Utsav's Cloudflare
+quick-tunnel URL changes on restart and must replace `HARNESS_API_URL` in
+Vercel, while `HARNESS_API_TOKEN` must match the harness process. Add one root
+README paragraph and link to the dashboard README without rewriting Utsav’s
+harness documentation.
 
 - [ ] **Step 5: Verify and commit**
 
@@ -867,7 +895,8 @@ Inspect `git diff origin/main...HEAD` for secrets and confirm `.superpowers`,
 - [ ] **Step 5: Deploy and smoke-test production**
 
 From `/dashboard`, link or create the intended Vercel project with root
-directory `dashboard`, set `MONGODB_URI`, `MONGODB_DB`, and `HARNESS_API_URL`
+directory `dashboard`, set `MONGODB_URI`, `MONGODB_DB`, `HARNESS_API_URL`, and
+`HARNESS_API_TOKEN`
 through Vercel’s secret UI/CLI prompts, then run:
 
 ```bash
