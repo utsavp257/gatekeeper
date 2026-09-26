@@ -109,12 +109,21 @@ def act3(db) -> None:
     say(f"\n{B}The model never changed. The harness did — and it lives in MongoDB Atlas.{X}\n", 0.5)
 
 
+def title() -> None:
+    print("\033[2J\033[H", end="")  # clear screen
+    say(f"\n\n   {B}GATEKEEPER{X}", 0.3)
+    say(f"   {D}a procurement agent whose guardrails evolve themselves{X}\n", 0.3)
+    say(f"   {D}same model · self-improving harness · MongoDB Atlas herd immunity{X}\n\n", 0.3)
+
+
 def main() -> None:
+    import sys
     os.environ.setdefault("PYTHONWARNINGS", "ignore")
     db = get_db()
-    act1(db)
-    act2(db)
-    act3(db)
+    acts = {"title": lambda: title(), "1": lambda: act1(db), "2": lambda: act2(db), "3": lambda: act3(db)}
+    chosen = sys.argv[sys.argv.index("--act") + 1] if "--act" in sys.argv else "all"
+    for key in (["1", "2", "3"] if chosen == "all" else [chosen]):
+        acts[key]()
 
 
 if __name__ == "__main__":
