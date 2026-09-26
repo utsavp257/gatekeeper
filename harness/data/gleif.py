@@ -41,6 +41,9 @@ class GleifClient:
                     data = json.load(r)
                 break
             except urllib.error.HTTPError as e:
+                if e.code == 404:  # LEI unknown to GLEIF (e.g. retired) — treat as empty
+                    data = {"data": [], "meta": {"pagination": {"lastPage": 1}}}
+                    break
                 if e.code == 429 and attempt < 3:
                     time.sleep(10 * (attempt + 1))
                     continue

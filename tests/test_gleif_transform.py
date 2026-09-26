@@ -18,3 +18,16 @@ def test_latin_legal_name_used_directly():
     rec = {"id": "X" * 20, "attributes": {"entity": {"legalName": {"name": "LUKOIL Securities B.V."}, "otherNames": [],
                                                       "legalAddress": {"country": "NL"}, "status": "ACTIVE"}}}
     assert to_entity(rec)["display_name"] == "LUKOIL Securities B.V."
+
+
+def test_unknown_lei_404_means_no_children(tmp_path, monkeypatch):
+    import urllib.error
+    import urllib.request
+
+    from harness.data.gleif import GleifClient
+
+    def not_found(*a, **k):
+        raise urllib.error.HTTPError("u", 404, "Not Found", {}, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", not_found)
+    assert GleifClient(str(tmp_path), min_interval_s=0).direct_children("X" * 20) == []
