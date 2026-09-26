@@ -23,20 +23,23 @@ def summarize(runs: list[dict]) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--k", type=int, default=3)
+    ap.add_argument("--fresh", action="store_true", help="ignore earlier runs; evaluate k new runs per genome")
     args = ap.parse_args()
     db = get_db()
     rows = {}
     for gid in ("g-0001", champion(db)["_id"]):
-        runs = matching_runs(db, gid, "heldout")
+        runs = [] if args.fresh else matching_runs(db, gid, "heldout")
         while len(runs) < args.k:
             runs.append(evaluate(db, gid, "heldout"))
         rows[gid] = summarize(runs[-args.k:])
+        rows[gid]["forced"] = sum(r["metrics"].get("forced", 0) for r in runs[-args.k:])
     doc = {"created_at": datetime.now(timezone.utc), "split": "heldout", "k": args.k, "rows": rows}
     db.reports.insert_one(doc)
     for gid, r in rows.items():
         fmt = lambda m: f"{m['mean']:.3f} [{m['min']:.3f}–{m['max']:.3f}]" if m else "—"  # noqa: E731
         print(f"{gid}: catch {fmt(r['catch_rate'])}  false_block {fmt(r['false_block_rate'])}  "
-              f"injection {fmt(r['injection_catch'])}  cost/case {fmt(r['cost_per_case_usd'])}  (n={r['n']}, runs={r['runs']})")
+              f"injection {fmt(r['injection_catch'])}  cost/case {fmt(r['cost_per_case_usd'])}  "
+              f"(n={r['n']}, runs={r['runs']}, forced={r['forced']})")
 
 
 if __name__ == "__main__":
