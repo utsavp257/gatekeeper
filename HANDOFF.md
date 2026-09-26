@@ -257,7 +257,7 @@ Owns these:
 - Each person commits only in their own folders.
 - `HANDOFF.md` and the root `README.md` are shared: announce before editing them.
 - Contract changes (§6, §7) require telling the other person first.
-- Until real data exists, B uses the seed script `harness/scripts/seed_mock.py`, which A ships in Sprint 0 and which writes fake genomes, events and eval runs matching §6. B should never be blocked on A's progress.
+- Until real data exists, B points the dashboard at `MONGODB_DB=gatekeeper_mock` and uses the seed script, which writes fake genomes, events and eval runs matching §6: `MONGODB_DB=gatekeeper_mock uv run python -m harness.scripts.seed_mock` (add `--stream` to emit a live event every 2s for testing the change-stream feed). B should never be blocked on A's progress. B switches to `MONGODB_DB=gatekeeper` after the Sprint 2 sync.
 
 ---
 
