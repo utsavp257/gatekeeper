@@ -8,6 +8,7 @@ BASELINE_POLICY = {
     "web": {"sanitize": [], "treat_as_untrusted": False},
     "antibodies": [],
     "tools": {"allow": ["screen_name"], "max_web_calls": 2},
+    "decisions": {"reject_requires_evidence": False, "escalate_requires_evidence": False, "min_evidence_score": 0.9},
 }
 
 DECISION_TOOL_NAMES = {"approve_vendor", "reject_vendor", "escalate"}

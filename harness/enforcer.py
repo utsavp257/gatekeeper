@@ -35,6 +35,16 @@ def decide(state: CaseState, tool_name: str, args: dict) -> tuple[str, str] | No
         return f"Tool {tool_name} is not granted by the current harness policy.", "policy.tools.allow"
     if tool_name == "web_research" and state.web_calls >= p.get("tools", {}).get("max_web_calls", 99):
         return "Web research budget for this case is exhausted.", "policy.tools.max_web_calls"
+    if tool_name in ("reject_vendor", "escalate"):
+        d = p.get("decisions") or {}
+        flag = "reject_requires_evidence" if tool_name == "reject_vendor" else "escalate_requires_evidence"
+        has_evidence = state.best_screen >= d.get("min_evidence_score", 0.9) or state.listed_ancestor_depth is not None
+        if d.get(flag) and not has_evidence:
+            return (f"No sanctions evidence: best screening similarity {state.best_screen:.2f} < "
+                    f"{d.get('min_evidence_score', 0.9)} and no listed parent found. A {tool_name} decision must rest on "
+                    "evidence, not nationality or name resemblance — run the remaining checks or approve.",
+                    f"policy.decisions.{flag}")
+        return None
     if tool_name != "approve_vendor":
         return None
     missing = [c for c in required_checks_for(p, "approve_vendor", state.case) if c not in state.checks_done]

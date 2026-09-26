@@ -52,6 +52,9 @@ RULES = {
     "tools.max_web_calls": _int_in(0, 4),
     "web.sanitize": lambda v: isinstance(v, list) and set(v) <= SANITIZERS,
     "web.treat_as_untrusted": lambda v: isinstance(v, bool),
+    "decisions.reject_requires_evidence": lambda v: isinstance(v, bool),
+    "decisions.escalate_requires_evidence": lambda v: isinstance(v, bool),
+    "decisions.min_evidence_score": lambda v: isinstance(v, (int, float)) and 0.5 <= v <= 1.0,
 }
 COUNTRY_DEPTH = re.compile(r"ownership\.depth_by_country\.([A-Z]{2})")
 
@@ -127,7 +130,7 @@ def gate(champ: dict, cand_train: dict, cand_heldout: dict | None) -> tuple[bool
 
 CRITIC_SYSTEM = """You are the critic in a self-improving compliance-agent harness. The agent model is FIXED; you improve
 the HARNESS POLICY that a deterministic enforcer applies around it. You see the current policy, the agent's failures on the
-training cases (with ground truth), and similar earlier attempts with their outcomes. Propose ONE small, targeted policy change
+training cases (with ground truth), and similar earlier attempts with their outcomes. Propose ONE coherent, targeted policy change (a small bundle of related ops is fine)
 that fixes a cluster of failures without blocking legitimate vendors or blowing up cost.
 
 Editable paths (JSON ops of the form {"op": "set", "path": <path>, "value": <value>}):
@@ -140,6 +143,9 @@ Editable paths (JSON ops of the form {"op": "set", "path": <path>, "value": <val
 - ownership.block_if_listed_ancestor_within: int 1-3 (hard-block approval if a listed parent is within N levels)
 - required_checks: list of {"before_tool":"approve_vendor","require":[checks...],"when":{"amount_gt":int,"country_in":[ISO2...]}}
   (checks: screen_name, check_ownership, web_research; "when" optional) — approval is blocked until these ran on the vendor
+- decisions.reject_requires_evidence / decisions.escalate_requires_evidence: bool — when true the enforcer BLOCKS
+  reject_vendor / escalate unless there is evidence: a screening similarity >= decisions.min_evidence_score (float 0.5-1.0)
+  or a listed parent found by check_ownership. Use this to stop rejections based on nationality or vague name resemblance.
 - web.sanitize: subset of ["drop_hidden_text","strip_imperatives","strip_urls_in_instructions"]; web.treat_as_untrusted: bool
 Note: granting a tool does not force its use — required_checks does. Hard blocks (min_score, block_if_listed_ancestor_within) apply
 only to evidence the enforcer has actually seen.

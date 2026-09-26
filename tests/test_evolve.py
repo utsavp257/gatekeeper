@@ -52,3 +52,9 @@ def test_gate_cost_cap():
     ok, why = gate(CHAMP, M(0.9, 0.0, 0.05), None)
     assert not ok and "cost" in why
     assert gate(CHAMP, M(0.9, 0.0, 0.015), None)[0]  # under the $0.02 absolute floor
+
+
+def test_decisions_paths_editable():
+    assert validate_diff([{"op": "set", "path": "decisions.reject_requires_evidence", "value": True}]) == []
+    assert validate_diff([{"op": "set", "path": "decisions.min_evidence_score", "value": 0.85}]) == []
+    assert validate_diff([{"op": "set", "path": "decisions.min_evidence_score", "value": 2}])

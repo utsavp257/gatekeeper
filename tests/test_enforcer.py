@@ -67,3 +67,29 @@ def test_web_call_budget():
     s.web_calls = 1
     reason, path = decide(s, "web_research", {"query": "Acme"})
     assert path == "policy.tools.max_web_calls"
+
+
+def test_reject_requires_evidence_when_enabled():
+    p = set_path(BASELINE_POLICY, "decisions", {"reject_requires_evidence": True, "escalate_requires_evidence": False,
+                                                 "min_evidence_score": 0.9})
+    s = _state(p)
+    s.best_screen = 0.6
+    reason, path = decide(s, "reject_vendor", {"reason": "Russian company"})
+    assert path == "policy.decisions.reject_requires_evidence" and "0.60" in reason
+    assert decide(s, "escalate", {"reason": "unsure"}) is None  # escalation not gated in this policy
+    s.best_screen = 0.93
+    assert decide(s, "reject_vendor", {"reason": "hit"}) is None
+
+
+def test_listed_ancestor_counts_as_evidence():
+    p = set_path(BASELINE_POLICY, "decisions", {"reject_requires_evidence": True, "escalate_requires_evidence": True,
+                                                 "min_evidence_score": 0.9})
+    s = _state(p)
+    reason, path = decide(s, "escalate", {"reason": "unsure"})
+    assert path == "policy.decisions.escalate_requires_evidence"
+    s.listed_ancestor_depth, s.listed_ancestor = 2, {"_id": "csl-SDN-9", "name": "BANK X"}
+    assert decide(s, "reject_vendor", {"reason": "parent listed"}) is None
+
+
+def test_baseline_has_no_evidence_requirement():
+    assert decide(_state(), "reject_vendor", {"reason": "x"}) is None
