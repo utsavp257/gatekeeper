@@ -150,6 +150,9 @@ Editable paths (JSON ops of the form {"op": "set", "path": <path>, "value": <val
 Note: granting a tool does not force its use — required_checks does. Hard blocks (min_score, block_if_listed_ancestor_within) apply
 only to evidence the enforcer has actually seen.
 
+Each similar prior attempt includes the train cases it got WRONG — if a rejected attempt broke something, fix that too
+rather than re-proposing the same change.
+
 Reply with ONLY a JSON object: {"rationale": "<one sentence: which failures, why this fixes them>", "diff": [ops...]}"""
 
 
@@ -188,9 +191,14 @@ def propose(db, champion: dict, run: dict) -> tuple[dict | None, str]:
     failures = failure_digest(db, run)
     summary = "; ".join(f"{f['attack_type']}:{f['decision']}" for f in failures)
     prior = similar_attempts(db, f"failures {summary}")
+    for p in prior:  # what each earlier attempt BROKE on train (train data only — held-out stays aggregate)
+        runs = matching_runs(db, p["_id"], "train")
+        p["train_failures"] = [{k: c[k] for k in ("attack_type", "vendor", "decision", "expected")}
+                               for c in (runs[-1]["per_case"] if runs else []) if not c["correct"]][:8]
     user = json.dumps({"current_policy": champion["policy"], "train_metrics": run["metrics"],
                        "train_failures": failures,
-                       "similar_prior_attempts": [{k: p.get(k) for k in ("_id", "status", "rationale", "diff", "gate_reason")}
+                       "similar_prior_attempts": [{k: p.get(k) for k in ("_id", "status", "rationale", "diff", "gate_reason",
+                                                                         "train_failures")}
                                                   for p in prior]}, default=str)
     s = load_settings()
     client = OpenAI(api_key=s.openrouter_api_key, base_url="https://openrouter.ai/api/v1", timeout=120, max_retries=2)
