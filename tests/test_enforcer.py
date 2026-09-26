@@ -104,3 +104,32 @@ def test_antibody_hit_blocks_approval_and_counts_as_evidence():
     reason, path = decide(s, "approve_vendor", {"reason": "pre-cleared"})
     assert path == "policy.antibodies.ab-001" and "injection" in reason
     assert decide(s, "escalate", {"reason": "injection detected"}) is None
+
+
+def test_no_deadlock_escalate_allowed_when_approval_hard_blocked():
+    # min_score 0.85 hard-blocks approval, evidence needs 0.9: a 0.87 hit used to block ALL three decisions
+    p = set_path(BASELINE_POLICY, "screening.min_score", 0.85)
+    p = set_path(p, "decisions", {"reject_requires_evidence": True, "escalate_requires_evidence": True, "min_evidence_score": 0.9})
+    s = _state(p)
+    s.checks_done.add("screen_name")
+    s.best_screen, s.best_screen_hit = 0.87, {"_id": "csl-SDN-1", "name": "AMUNDI X"}
+    assert decide(s, "approve_vendor", {"reason": "x"})[1] == "policy.screening.min_score"
+    assert decide(s, "escalate", {"reason": "borderline"}) is None
+
+
+def test_tool_call_budget_forces_decision():
+    from harness.enforcer import MAX_TOOL_CALLS
+    s = _state()
+    s.tool_calls = MAX_TOOL_CALLS
+    reason, path = decide(s, "screen_name", {"name": "Acme"})
+    assert path == "harness.max_tool_calls"
+    assert decide(s, "escalate", {"reason": "x"}) is None  # decisions still possible
+
+
+def test_escalate_allowed_after_budget_even_without_evidence():
+    from harness.enforcer import MAX_TOOL_CALLS
+    p = set_path(BASELINE_POLICY, "decisions", {"reject_requires_evidence": True, "escalate_requires_evidence": True,
+                                                 "min_evidence_score": 0.9})
+    s = _state(p)
+    s.tool_calls = MAX_TOOL_CALLS
+    assert decide(s, "escalate", {"reason": "budget"}) is None
