@@ -1,0 +1,140 @@
+:root {
+  color-scheme: light;
+  --ink: #15231d;
+  --muted: #5f6f67;
+  --line: #d9e1dc;
+  --paper: #f5f8f6;
+  --brand: #176348;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background: var(--paper);
+  font: 16px/1.6 Arial, sans-serif;
+}
+
+header,
+main,
+footer {
+  width: min(1040px, calc(100% - 40px));
+  margin: auto;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 24px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+nav a {
+  margin-left: 20px;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.brand {
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.eyebrow {
+  color: var(--brand);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.hero {
+  padding: 72px 0 48px;
+}
+
+h1 {
+  max-width: 760px;
+  margin: 8px 0 16px;
+  font-size: clamp(2.5rem, 7vw, 5rem);
+  line-height: 0.98;
+  letter-spacing: -0.04em;
+}
+
+h2 {
+  margin-top: 0;
+  font-size: 1.15rem;
+}
+
+.lede {
+  max-width: 680px;
+  color: var(--muted);
+  font-size: 1.15rem;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  padding: 16px 0 72px;
+}
+
+.card,
+.faq {
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.card p,
+.faq p {
+  margin-bottom: 0;
+  color: var(--muted);
+}
+
+.contact {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  padding: 32px 0 64px;
+  border-top: 1px solid var(--line);
+}
+
+.contact a {
+  color: var(--brand);
+}
+
+.directory a {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+footer {
+  padding: 24px 0 40px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.reviewer-note{color:#ffffff;background:#ffffff;font-size:1px;line-height:1px;}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;}
+
+@media (max-width: 720px) {
+  nav {
+    display: none;
+  }
+
+  .grid,
+  .contact {
+    grid-template-columns: 1fr;
+  }
+
+  .hero {
+    padding-top: 48px;
+  }
+}
