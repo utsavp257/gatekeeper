@@ -189,9 +189,10 @@ def propose(db, champion: dict, run: dict) -> tuple[dict | None, str]:
     s = load_settings()
     client = OpenAI(api_key=s.openrouter_api_key, base_url="https://openrouter.ai/api/v1", timeout=120, max_retries=2)
     resp = client.chat.completions.create(model=s.critic_model or "anthropic/claude-sonnet-5", temperature=0.2,
-                                          max_tokens=1500, messages=[{"role": "system", "content": CRITIC_SYSTEM},
-                                                                     {"role": "user", "content": user}])
-    text = resp.choices[0].message.content or ""
+                                          max_tokens=4000, extra_body={"reasoning": {"effort": "low"}},
+                                          messages=[{"role": "system", "content": CRITIC_SYSTEM},
+                                                    {"role": "user", "content": user}])
+    text = resp.choices[0].message.content or f"<empty reply, finish_reason={resp.choices[0].finish_reason}>"
     return extract_json(text), text
 
 
