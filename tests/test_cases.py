@@ -75,3 +75,12 @@ def test_split_is_stratified_by_attack_and_opacity():
         assert any(c["opaque"] for c in ind) and any(not c["opaque"] for c in ind), split
         for kind in ("direct_listed", "name_variant", "clean"):
             assert any(c["attack_type"] == kind for c in cases if c["split"] == split), (split, kind)
+
+
+def test_clean_cases_round_robin_across_countries():
+    listed, children, grandchildren, _ = _fixture()
+    clean = [_ent(f"N{i:019d}", f"Clean Widgets {i} GmbH", "DE") for i in range(20)] + \
+            [_ent(f"R{i:019d}", f"Ural Timber Works {i} OOO", "RU") for i in range(5)]
+    cases, _ = build_cases(listed, children, grandchildren, clean)
+    countries = [c["vendor"]["country"] for c in cases if c["attack_type"] == "clean"]
+    assert countries.count("RU") == 5  # a minority country is not crowded out by the first 20 sorted ids

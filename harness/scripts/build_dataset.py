@@ -12,7 +12,7 @@ from harness.db import get_db
 
 CSL_URL = "https://data.trade.gov/downloadable_consolidated_screening_list/v1/consolidated.csv"
 RAW = Path("data/raw")
-CLEAN_COUNTRIES = ["DE", "NL", "AE", "HK", "CY", "TR", "IN", "SG"]
+CLEAN_COUNTRIES = ["RU", "CN", "CY", "AE", "HK", "DE", "NL", "TR", "IN", "SG"]  # RU/CN: country must not be a proxy
 
 
 def main() -> None:
@@ -49,7 +49,9 @@ def main() -> None:
                 edges.append({"child_lei": g["_id"], "parent_lei": k["_id"], "type": "direct"})
     clean = []
     for c in CLEAN_COUNTRIES:
-        clean += [to_entity(r) for r in gleif.by_country(c, 20)]
+        clean += [to_entity(r) for r in gleif.by_country(c, 40 if c == "RU" else 20)]
+    risky = {e["child_lei"] for e in edges}
+    clean = [e for e in clean if e["_id"] not in risky]  # a subsidiary of a listed parent is never a clean negative
     for e in clean:
         entities.setdefault(e["_id"], e)
 
@@ -66,7 +68,8 @@ def main() -> None:
     else:
         rng_clean = sorted(clean, key=lambda e: e["_id"])
         cases, labels = build_cases(listed + list(db.screening_list.find({"leis": [], "country": {"$ne": None}, "type": "Entity"}).limit(400)),
-                                    children, grandchildren, rng_clean)
+                                    children, grandchildren, rng_clean,
+                                    clean_quota={"RU": 10, "CN": 4, "CY": 3, "AE": 3, "HK": 2, "DE": 2, "NL": 2, "TR": 1, "IN": 1})
         db.cases.drop()
         db.case_labels.drop()
         db.cases.insert_many(cases)

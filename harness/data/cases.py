@@ -74,7 +74,7 @@ def _assign_splits(cases: list[dict]) -> None:
                 m["split"] = "heldout" if i % 3 == 1 else "train"
 
 
-def build_cases(listed, children, grandchildren, clean, seed: int = 7):
+def build_cases(listed, children, grandchildren, clean, seed: int = 7, clean_quota: dict | None = None):
     rng = random.Random(seed)
     listed = sorted(listed, key=lambda d: d["_id"])
     forbidden = {d["name_norm"] for d in listed} | {normalize_name(a) for d in listed for a in d["alt_names"]}
@@ -121,9 +121,18 @@ def build_cases(listed, children, grandchildren, clean, seed: int = 7):
         if v:
             add("name_variant", v[0], d["country"], None, d["_id"], {"listed_id": d["_id"], "original": d["name"]})
 
-    for e in clean[:20]:
-        if normalize_name(e["display_name"]) not in forbidden:
-            add("clean", e["display_name"], e["country"], e["_id"], None, {})
+    by_country: dict = {}
+    for e in sorted(clean, key=lambda e: e["_id"]):
+        if e["_id"] not in listed_leis and normalize_name(e["display_name"]) not in forbidden:
+            by_country.setdefault(e["country"], []).append(e)
+    if clean_quota:  # explicit per-country counts, e.g. to match the country mix of the risky cases
+        by_country = {c: v[: clean_quota.get(c, 0)] for c, v in by_country.items()}
+    picked, i = [], 0
+    while len(picked) < 28 and any(len(v) > i for v in by_country.values()):
+        picked += [v[i] for _, v in sorted(by_country.items()) if len(v) > i][: 28 - len(picked)]
+        i += 1
+    for e in picked:  # round-robin so country is never a proxy for the label
+        add("clean", e["display_name"], e["country"], e["_id"], None, {})
 
     _assign_splits(cases)
     return cases, labels
