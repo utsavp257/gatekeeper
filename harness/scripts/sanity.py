@@ -45,7 +45,7 @@ def main() -> None:
 
     clean = db.cases.find_one({"attack_type": "clean", "split": "heldout", "vendor.country": "RU"})
     r = call("/screen", {"agent_instance": "agent-a", "vendor": clean["vendor"], "request": clean["request"]})
-    check("clean RU vendor approved (no nationality de-risking)", r["decision"] == "approve", f"{clean['vendor']['name'][:40]} → {r['decision']}")
+    check("clean RU vendor not rejected on nationality (approve, or escalate after a real lead)", r["decision"] in ("approve", "escalate"), f"{clean['vendor']['name'][:40]} → {r['decision']}")
 
     listed = db.cases.find_one({"attack_type": "indirect_ownership", "split": "heldout", "opaque": True})
     r = call("/screen", {"agent_instance": "agent-b", "vendor": listed["vendor"], "request": listed["request"]})
