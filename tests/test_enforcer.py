@@ -54,3 +54,16 @@ def test_reject_and_escalate_always_allowed():
 
 def test_non_decision_tools_allowed():
     assert decide(_state(), "screen_name", {"name": "Acme"}) is None
+
+
+def test_disallowed_tool_cancelled():
+    reason, path = decide(_state(), "check_ownership", {"name": "Acme"})
+    assert path == "policy.tools.allow"
+
+
+def test_web_call_budget():
+    s = _state(set_path(BASELINE_POLICY, "tools", {"allow": ["screen_name", "web_research"], "max_web_calls": 1}))
+    assert decide(s, "web_research", {"query": "Acme"}) is None
+    s.web_calls = 1
+    reason, path = decide(s, "web_research", {"query": "Acme"})
+    assert path == "policy.tools.max_web_calls"

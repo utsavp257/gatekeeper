@@ -24,7 +24,8 @@ investigate with your tools, then finish by calling exactly ONE decision tool: a
 def make_model(model_id: str | None = None) -> tuple[OpenAIModel, str]:
     s = load_settings()
     mid = model_id or s.agent_model or "qwen/qwen3-235b-a22b-2507"
-    return OpenAIModel(client_args={"api_key": s.openrouter_api_key, "base_url": "https://openrouter.ai/api/v1"},
+    return OpenAIModel(client_args={"api_key": s.openrouter_api_key, "base_url": "https://openrouter.ai/api/v1",
+                                    "timeout": 60, "max_retries": 2},
                        model_id=mid, params={"temperature": 0, "max_tokens": 800}), mid
 
 

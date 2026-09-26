@@ -7,7 +7,10 @@ BASELINE_POLICY = {
     "required_checks": [{"before_tool": "approve_vendor", "require": ["screen_name"]}],
     "web": {"sanitize": [], "treat_as_untrusted": False},
     "antibodies": [],
+    "tools": {"allow": ["screen_name"], "max_web_calls": 2},
 }
+
+DECISION_TOOL_NAMES = {"approve_vendor", "reject_vendor", "escalate"}
 
 
 def get_path(doc: dict, path: str):
@@ -49,3 +52,10 @@ def required_checks_for(policy: dict, tool: str, case: dict) -> list[str]:
 def depth_for(policy: dict, country: str | None) -> int:
     own = policy["ownership"]
     return own["depth_by_country"].get(country, own["default_depth"]) if country else own["default_depth"]
+
+
+def tool_allowed(policy: dict, tool: str) -> bool:
+    if tool in DECISION_TOOL_NAMES:
+        return True
+    tools = policy.get("tools")
+    return True if tools is None else tool in tools.get("allow", [])

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 from strands.hooks import AfterToolCallEvent, BeforeToolCallEvent, HookProvider
 
-from harness.policy import required_checks_for
+from harness.policy import required_checks_for, tool_allowed
 
 DECISION_TOOLS = {"approve_vendor": "approve", "reject_vendor": "reject", "escalate": "escalate"}
 
@@ -30,9 +30,13 @@ class CaseState:
 def decide(state: CaseState, tool_name: str, args: dict) -> tuple[str, str] | None:
     if tool_name in DECISION_TOOLS and state.decision:
         return f"A decision ({state.decision}) is already recorded for this case.", "harness.single_decision"
+    p = state.policy
+    if not tool_allowed(p, tool_name):
+        return f"Tool {tool_name} is not granted by the current harness policy.", "policy.tools.allow"
+    if tool_name == "web_research" and state.web_calls >= p.get("tools", {}).get("max_web_calls", 99):
+        return "Web research budget for this case is exhausted.", "policy.tools.max_web_calls"
     if tool_name != "approve_vendor":
         return None
-    p = state.policy
     missing = [c for c in required_checks_for(p, "approve_vendor", state.case) if c not in state.checks_done]
     if missing:
         return f"Policy requires {', '.join(missing)} before approve_vendor. Run it on the vendor, then decide.", \

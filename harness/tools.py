@@ -5,7 +5,7 @@ from strands import tool
 
 from harness.enforcer import DECISION_TOOLS, CaseState
 from harness.matching import best_similarity, name_similarity
-from harness.policy import depth_for
+from harness.policy import depth_for, tool_allowed
 from harness.sanitize import sanitize
 
 
@@ -79,7 +79,13 @@ def build_tools(db, state: CaseState, tavily):
         state.web_calls += 1
         if name_similarity(query, vendor["name"]) >= 0.5 or normalize_in(vendor["name"], query):
             state.checks_done.add("web_research")
-        res = tavily.search(query, max_results=3)
+        key = " ".join(query.lower().split())
+        cached = db.web_cache.find_one({"_id": key})
+        if cached:  # Tavily credits are scarce; identical queries are served from Atlas
+            res = cached["response"]
+        else:
+            res = tavily.search(query, max_results=3, timeout=20)
+            db.web_cache.update_one({"_id": key}, {"$set": {"response": res}}, upsert=True)
         rules = policy["web"]["sanitize"]
         items = [{"title": r["title"], "url": r["url"], "content": sanitize(r.get("content", ""), rules)[:600]}
                  for r in res.get("results", [])]
@@ -107,7 +113,8 @@ def build_tools(db, state: CaseState, tavily):
         return _decision("escalate")(reason)
 
     assert set(DECISION_TOOLS) == {"approve_vendor", "reject_vendor", "escalate"}
-    return [screen_name, check_ownership, web_research, approve_vendor, reject_vendor, escalate]
+    tools = [screen_name, check_ownership, web_research, approve_vendor, reject_vendor, escalate]
+    return [t for t in tools if tool_allowed(policy, t.tool_name)]  # the model only sees granted tools
 
 
 def normalize_in(vendor_name: str, query: str) -> bool:

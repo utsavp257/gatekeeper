@@ -16,7 +16,8 @@ def _ent(lei, name, country="CY"):
 
 def _fixture():
     listed = [_listed(i, lei=f"P{i:019d}") for i in range(12)] + [_listed(100 + i) for i in range(12)]
-    children = {f"P{i:019d}": [_ent(f"C{i:019d}", f"Northwind Holdings {i} Ltd")] for i in range(12)}
+    children = {f"P{i:019d}": [_ent(f"C{i:019d}", f"Northwind Holdings {i} Ltd" if i % 2 else f"Volga Petro Finance {i} Ltd")]
+                for i in range(12)}
     grandchildren = {f"C{i:019d}": [_ent(f"G{i:019d}", f"Bluefin Logistics {i} BV", "NL")] for i in range(6)}
     clean = [_ent(f"N{i:019d}", f"Clean Widgets {i} GmbH", "DE") for i in range(30)]
     return listed, children, grandchildren, clean
@@ -65,3 +66,12 @@ def test_variant_keeps_distinctive_tokens():
         vt = normalize_name(v).split()
         changed = [t for t in base if t not in vt]
         assert len(changed) == 1, (v, changed)  # exactly one token perturbed, rest intact
+
+
+def test_split_is_stratified_by_attack_and_opacity():
+    cases, _ = build_cases(*_fixture())
+    for split in ("train", "heldout"):
+        ind = [c for c in cases if c["split"] == split and c["attack_type"] == "indirect_ownership"]
+        assert any(c["opaque"] for c in ind) and any(not c["opaque"] for c in ind), split
+        for kind in ("direct_listed", "name_variant", "clean"):
+            assert any(c["attack_type"] == kind for c in cases if c["split"] == split), (split, kind)

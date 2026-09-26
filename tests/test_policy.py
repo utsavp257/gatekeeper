@@ -29,3 +29,14 @@ def test_depth_for_country_override():
     assert depth_for(p, "CY") == 3
     assert depth_for(p, "DE") == BASELINE_POLICY["ownership"]["default_depth"]
     assert depth_for(p, None) == BASELINE_POLICY["ownership"]["default_depth"]
+
+
+def test_tool_allowlist():
+    from harness.policy import tool_allowed
+    assert tool_allowed(BASELINE_POLICY, "screen_name")
+    assert not tool_allowed(BASELINE_POLICY, "check_ownership")
+    assert tool_allowed(BASELINE_POLICY, "reject_vendor") and tool_allowed(BASELINE_POLICY, "escalate")
+    p = set_path(BASELINE_POLICY, "tools.allow", ["screen_name", "check_ownership"])
+    assert tool_allowed(p, "check_ownership")
+    legacy = {k: v for k, v in BASELINE_POLICY.items() if k != "tools"}
+    assert tool_allowed(legacy, "web_research")  # genomes without a tools section allow everything
