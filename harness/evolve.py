@@ -14,7 +14,7 @@ from harness.eval import evaluate
 from harness.genomes import champion as get_champion
 from harness.policy import set_path
 
-CHECKS = {"screen_name", "check_ownership", "web_research"}
+CHECKS = {"screen_name", "check_ownership", "web_research", "fetch_website"}
 SANITIZERS = {"drop_hidden_text", "strip_imperatives", "strip_urls_in_instructions"}
 COST_FLOOR_USD = 0.02
 
@@ -134,7 +134,7 @@ training cases (with ground truth), and similar earlier attempts with their outc
 that fixes a cluster of failures without blocking legitimate vendors or blowing up cost.
 
 Editable paths (JSON ops of the form {"op": "set", "path": <path>, "value": <value>}):
-- tools.allow: subset of ["screen_name","check_ownership","web_research"] (must include screen_name) — which tools the agent is granted
+- tools.allow: subset of ["screen_name","check_ownership","web_research","fetch_website"] (must include screen_name) — which tools the agent is granted
 - tools.max_web_calls: int 0-4
 - screening.fuzzy_max_edits: int 0-2 (Atlas Search fuzzy matching on sanctions names)
 - screening.min_score: float 0.5-1.0 (name similarity at/above which approval is hard-blocked)
@@ -142,7 +142,7 @@ Editable paths (JSON ops of the form {"op": "set", "path": <path>, "value": <val
 - ownership.depth_by_country.<ISO2>: int 1-3
 - ownership.block_if_listed_ancestor_within: int 1-3 (hard-block approval if a listed parent is within N levels)
 - required_checks: list of {"before_tool":"approve_vendor","require":[checks...],"when":{"amount_gt":int,"country_in":[ISO2...]}}
-  (checks: screen_name, check_ownership, web_research; "when" optional) — approval is blocked until these ran on the vendor
+  (checks: screen_name, check_ownership, web_research, fetch_website; "when" optional) — approval is blocked until these ran on the vendor
 - decisions.reject_requires_evidence / decisions.escalate_requires_evidence: bool — when true the enforcer BLOCKS
   reject_vendor / escalate unless there is evidence: a screening similarity >= decisions.min_evidence_score (float 0.5-1.0)
   or a listed parent found by check_ownership. Use this to stop rejections based on nationality or vague name resemblance.

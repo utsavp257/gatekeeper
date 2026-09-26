@@ -7,6 +7,7 @@ from strands import Agent
 from strands.models.openai import OpenAIModel
 from tavily import TavilyClient
 
+from harness.antibodies import embed_cached, neutralize, scan
 from harness.config import load_settings
 from harness.costs import TAVILY_SEARCH_USD, tokens_cost
 from harness.enforcer import CaseState, GatekeeperHooks
@@ -33,7 +34,7 @@ def make_model(model_id: str | None = None) -> tuple[OpenAIModel, str]:
                        model_id=mid, params={"temperature": 0, "max_tokens": 800}), mid
 
 
-def _prompt(case: dict) -> str:
+def _prompt(case: dict, justification: str | None = None) -> str:
     v, r = case["vendor"], case["request"]
     lines = [f"Vendor onboarding request {case['_id']}:", f"- Vendor legal name: {v['name']}",
              f"- Country: {v.get('country') or 'unknown'}"]
@@ -41,7 +42,7 @@ def _prompt(case: dict) -> str:
         lines.append(f"- LEI: {v['lei']}")
     if v.get("website"):
         lines.append(f"- Website: {v['website']}")
-    lines += [f"- Purchase order: ${r['amount_usd']:,} — {r['justification']}", "Investigate and decide."]
+    lines += [f"- Purchase order: ${r['amount_usd']:,} — {justification if justification is not None else r['justification']}", "Investigate and decide."]
     return "\n".join(lines)
 
 
@@ -54,7 +55,10 @@ def run_case(db, case: dict, genome: dict, agent_instance: str = "agent-a", mode
                   system_prompt=SYSTEM_PROMPT, callback_handler=None)
     t0, error, nudged = time.time(), None, False
     try:
-        result = agent(_prompt(case))
+        # the requester's justification is untrusted input too: antibodies run before the model reads it
+        hits = scan(case["request"]["justification"], genome["policy"].get("antibodies") or [], lambda t: embed_cached(db, t))
+        state.injection_hits += hits
+        result = agent(_prompt(case, neutralize(case["request"]["justification"], hits)))
         usage, memo = dict(result.metrics.accumulated_usage), str(result)
         if state.decision is None:  # decision nudge: the case must end in an explicit, enforceable decision
             nudged = True
@@ -73,9 +77,12 @@ def run_case(db, case: dict, genome: dict, agent_instance: str = "agent-a", mode
         "genome_id": genome["_id"], "model": mid, "steps": state.steps, "blocked": state.blocked,
         "decision": decision, "forced": state.decision is None and not error, "memo": state.decision_reason or memo,
         "final_message": memo[:2000], "error": error, "cost_usd": round(cost, 6), "usage": usage,
-        "duration_s": round(time.time() - t0, 2), "created_at": now, "failed": None, "nudged": nudged})
+        "duration_s": round(time.time() - t0, 2), "created_at": now, "failed": None, "nudged": nudged,
+        "injection_hits": state.injection_hits})
     events = [{"ts": now, "type": "blocked", "agent_instance": agent_instance, "genome_id": genome["_id"],
                "payload": dict(b, case_id=case["_id"], vendor=case["vendor"]["name"])} for b in state.blocked]
+    events += [{"ts": now, "type": "antibody_hit", "agent_instance": agent_instance, "genome_id": genome["_id"],
+                "payload": dict(h, case_id=case["_id"], vendor=case["vendor"]["name"])} for h in state.injection_hits]
     events.append({"ts": now, "type": "decision", "agent_instance": agent_instance, "genome_id": genome["_id"],
                    "payload": {"case_id": case["_id"], "vendor": case["vendor"]["name"], "decision": decision,
                                "trace_id": trace_id}})

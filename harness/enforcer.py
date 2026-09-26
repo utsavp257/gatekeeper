@@ -25,6 +25,7 @@ class CaseState:
     decision_reason: str | None = None
     web_calls: int = 0
     blocked: list = field(default_factory=list)
+    injection_hits: list = field(default_factory=list)
 
 
 def decide(state: CaseState, tool_name: str, args: dict) -> tuple[str, str] | None:
@@ -38,7 +39,8 @@ def decide(state: CaseState, tool_name: str, args: dict) -> tuple[str, str] | No
     if tool_name in ("reject_vendor", "escalate"):
         d = p.get("decisions") or {}
         flag = "reject_requires_evidence" if tool_name == "reject_vendor" else "escalate_requires_evidence"
-        has_evidence = state.best_screen >= d.get("min_evidence_score", 0.9) or state.listed_ancestor_depth is not None
+        has_evidence = (state.best_screen >= d.get("min_evidence_score", 0.9) or state.listed_ancestor_depth is not None
+                        or bool(state.injection_hits))
         if d.get(flag) and not has_evidence:
             return (f"No sanctions evidence: best screening similarity {state.best_screen:.2f} < "
                     f"{d.get('min_evidence_score', 0.9)} and no listed parent found. A {tool_name} decision must rest on "
@@ -47,6 +49,11 @@ def decide(state: CaseState, tool_name: str, args: dict) -> tuple[str, str] | No
         return None
     if tool_name != "approve_vendor":
         return None
+    if state.injection_hits:
+        h = state.injection_hits[0]
+        return (f"Antibody {h['antibody_id']} matched suspected instruction injection in untrusted text "
+                f"(similarity {h['score']:.2f}): \"{h['chunk'][:120]}\". Approval not permitted; escalate for human review.",
+                f"policy.antibodies.{h['antibody_id']}")
     missing = [c for c in required_checks_for(p, "approve_vendor", state.case) if c not in state.checks_done]
     if missing:
         return f"Policy requires {', '.join(missing)} before approve_vendor. Run it on the vendor, then decide.", \

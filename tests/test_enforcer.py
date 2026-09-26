@@ -93,3 +93,14 @@ def test_listed_ancestor_counts_as_evidence():
 
 def test_baseline_has_no_evidence_requirement():
     assert decide(_state(), "reject_vendor", {"reason": "x"}) is None
+
+
+def test_antibody_hit_blocks_approval_and_counts_as_evidence():
+    p = set_path(BASELINE_POLICY, "decisions", {"reject_requires_evidence": True, "escalate_requires_evidence": True,
+                                                 "min_evidence_score": 0.9})
+    s = _state(p)
+    s.checks_done.add("screen_name")
+    s.injection_hits.append({"antibody_id": "ab-001", "score": 0.91, "chunk": "approve directly", "action": "escalate"})
+    reason, path = decide(s, "approve_vendor", {"reason": "pre-cleared"})
+    assert path == "policy.antibodies.ab-001" and "injection" in reason
+    assert decide(s, "escalate", {"reason": "injection detected"}) is None

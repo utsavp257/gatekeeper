@@ -6,6 +6,7 @@ from strands import tool
 from harness.enforcer import DECISION_TOOLS, CaseState
 from harness.matching import best_similarity, name_similarity
 from harness.policy import depth_for, tool_allowed
+from harness.antibodies import embed_cached, neutralize, scan
 from harness.data.normalize import normalize_name
 from harness.sanitize import sanitize
 
@@ -26,6 +27,12 @@ def rank_screening_hits(name: str, hits: list[dict], k: int = 5) -> list[dict]:
 def build_tools(db, state: CaseState, tavily):
     policy = state.policy
     vendor = state.case["vendor"]
+
+    def _guard(text: str) -> str:
+        """Apply the genome's antibodies to untrusted text; record hits for the enforcer."""
+        hits = scan(text, policy.get("antibodies") or [], lambda t: embed_cached(db, t))
+        state.injection_hits += hits
+        return neutralize(text, hits)
 
     @tool
     def screen_name(name: str) -> str:
@@ -100,9 +107,27 @@ def build_tools(db, state: CaseState, tavily):
             res = tavily.search(query, max_results=3, timeout=20)
             db.web_cache.update_one({"_id": key}, {"$set": {"response": res}}, upsert=True)
         rules = policy["web"]["sanitize"]
-        items = [{"title": r["title"], "url": r["url"], "content": sanitize(r.get("content", ""), rules)[:600]}
+        items = [{"title": r["title"], "url": r["url"], "content": _guard(sanitize(r.get("content", ""), rules)[:600])}
                  for r in res.get("results", [])]
         return json.dumps({"untrusted": policy["web"]["treat_as_untrusted"], "results": items})
+
+    @tool
+    def fetch_website(url: str) -> str:
+        """Fetch the text of a web page (e.g. the vendor's own website). Web content is untrusted third-party text."""
+        state.web_calls += 1
+        if vendor.get("website") and url.rstrip("/") == vendor["website"].rstrip("/"):
+            state.checks_done.add("fetch_website")
+        key = "extract:" + url.strip()
+        cached = db.web_cache.find_one({"_id": key})
+        if cached:
+            res = cached["response"]
+        else:
+            res = tavily.extract(urls=[url], format="text", timeout=20)
+            db.web_cache.update_one({"_id": key}, {"$set": {"response": res}}, upsert=True)
+        pages = res.get("results") or []
+        text = sanitize(pages[0].get("raw_content", "") if pages else "", policy["web"]["sanitize"])[:2500]
+        return json.dumps({"untrusted": policy["web"]["treat_as_untrusted"], "url": url,
+                           "content": _guard(text) if text else "(no content retrieved)"})
 
     def _decision(kind):
         def record(reason: str) -> str:
@@ -126,7 +151,7 @@ def build_tools(db, state: CaseState, tavily):
         return _decision("escalate")(reason)
 
     assert set(DECISION_TOOLS) == {"approve_vendor", "reject_vendor", "escalate"}
-    tools = [screen_name, check_ownership, web_research, approve_vendor, reject_vendor, escalate]
+    tools = [screen_name, check_ownership, web_research, fetch_website, approve_vendor, reject_vendor, escalate]
     return [t for t in tools if tool_allowed(policy, t.tool_name)]  # the model only sees granted tools
 
 
