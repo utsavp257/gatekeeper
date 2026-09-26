@@ -1,0 +1,73 @@
+"""The enforcer: deterministic policy applied BEFORE tool execution. The model cannot override it."""
+import time
+from dataclasses import dataclass, field
+
+from strands.hooks import AfterToolCallEvent, BeforeToolCallEvent, HookProvider
+
+from harness.policy import required_checks_for
+
+DECISION_TOOLS = {"approve_vendor": "approve", "reject_vendor": "reject", "escalate": "escalate"}
+
+
+@dataclass
+class CaseState:
+    case: dict
+    genome_id: str
+    policy: dict
+    agent_instance: str
+    checks_done: set = field(default_factory=set)
+    best_screen: float = 0.0
+    best_screen_hit: dict | None = None
+    listed_ancestor_depth: int | None = None
+    listed_ancestor: dict | None = None
+    steps: list = field(default_factory=list)
+    decision: str | None = None
+    decision_reason: str | None = None
+    web_calls: int = 0
+    blocked: list = field(default_factory=list)
+
+
+def decide(state: CaseState, tool_name: str, args: dict) -> tuple[str, str] | None:
+    if tool_name in DECISION_TOOLS and state.decision:
+        return f"A decision ({state.decision}) is already recorded for this case.", "harness.single_decision"
+    if tool_name != "approve_vendor":
+        return None
+    p = state.policy
+    missing = [c for c in required_checks_for(p, "approve_vendor", state.case) if c not in state.checks_done]
+    if missing:
+        return f"Policy requires {', '.join(missing)} before approve_vendor. Run it on the vendor, then decide.", \
+               "policy.required_checks"
+    if state.best_screen_hit and state.best_screen >= p["screening"]["min_score"]:
+        h = state.best_screen_hit
+        return (f"Screening hit {h['_id']} ({h['name']}, similarity {state.best_screen:.2f} ≥ "
+                f"{p['screening']['min_score']}). Approval not permitted.", "policy.screening.min_score")
+    limit = p["ownership"]["block_if_listed_ancestor_within"]
+    if state.listed_ancestor_depth is not None and state.listed_ancestor_depth <= limit:
+        a = state.listed_ancestor
+        return (f"Listed ancestor {a['_id']} ({a['name']}) at depth {state.listed_ancestor_depth} ≤ {limit}. "
+                "Approval not permitted.", "policy.ownership.block_if_listed_ancestor_within")
+    return None
+
+
+class GatekeeperHooks(HookProvider):
+    def __init__(self, state: CaseState):
+        self.state = state
+
+    def register_hooks(self, registry, **kwargs):
+        registry.add_callback(BeforeToolCallEvent, self.before)
+        registry.add_callback(AfterToolCallEvent, self.after)
+
+    def before(self, event: BeforeToolCallEvent):
+        name, args = event.tool_use["name"], event.tool_use.get("input") or {}
+        verdict = decide(self.state, name, args)
+        if verdict:
+            reason, path = verdict
+            event.cancel_tool = f"BLOCKED by {path}: {reason}"
+            self.state.blocked.append({"tool": name, "blocked_by": path, "reason": reason})
+
+    def after(self, event: AfterToolCallEvent):
+        content = event.result.get("content") or [{}]
+        text = " ".join(str(c.get("text", "")) for c in content)
+        self.state.steps.append({"t": time.time(), "tool": event.tool_use["name"],
+                                 "args": event.tool_use.get("input") or {}, "result_summary": text[:400],
+                                 "blocked_by": event.cancel_message and event.cancel_message.split(":")[0][11:]})
