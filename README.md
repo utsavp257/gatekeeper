@@ -123,8 +123,8 @@ uv run pytest -q                                         # 112 tests
 - `GET /health`
 - `POST /screen`: takes `{agent_instance, genome_id?, vendor, request}`
 - `POST /redteam/attack`
-- `POST /evolve/step`
-- `POST /immune/step`
+- `POST /evolve/step`, `POST /immune/step`: return 202 with a `job_id`; poll `GET /jobs/{id}`
+- every `POST` requires the `x-harness-token` header (`HARNESS_API_TOKEN`)
 
 The dashboard (Next.js on Vercel) reads the same Atlas collections. It's in progress.
 

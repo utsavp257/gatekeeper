@@ -6,7 +6,10 @@ import threading
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException
+import hmac
+import os
+
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -21,6 +24,18 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 db = get_db()
 AGENTS: dict[str, AgentInstance] = {}
 STEP_LOCK = threading.Lock()  # one evolve/immune step at a time (version numbers, promotions)
+
+
+def token_ok(configured: str | None, provided: str | None) -> bool:
+    """Action endpoints spend model/search credits; when HARNESS_API_TOKEN is set they require it."""
+    if not configured:
+        return True
+    return bool(provided) and hmac.compare_digest(configured, provided)
+
+
+def require_token(x_harness_token: str | None = Header(default=None)) -> None:
+    if not token_ok(os.environ.get("HARNESS_API_TOKEN"), x_harness_token):
+        raise HTTPException(401, "missing or invalid x-harness-token")
 
 
 @app.on_event("startup")
@@ -66,7 +81,7 @@ def health() -> dict:
             "agents": {n: a.current()["_id"] for n, a in AGENTS.items()}}
 
 
-@app.post("/screen")
+@app.post("/screen", dependencies=[Depends(require_token)])
 def screen(body: ScreenBody) -> dict:
     agent = _agent(body.agent_instance)
     case = {"_id": f"live-{uuid.uuid4().hex[:8]}", "split": "live", "attack_type": "live",
@@ -81,7 +96,7 @@ def screen(body: ScreenBody) -> dict:
             "genome_id": genome["_id"], "cost_usd": r["cost_usd"]}
 
 
-@app.post("/redteam/attack")
+@app.post("/redteam/attack", dependencies=[Depends(require_token)])
 def attack(body: AttackBody) -> dict:
     if body.family not in FAMILIES and not body.payload:
         raise HTTPException(400, f"family must be one of {list(FAMILIES)} or give a payload")
@@ -100,22 +115,60 @@ def attack(body: AttackBody) -> dict:
             "genome_id": agent.current()["_id"], "trace_id": r["trace_id"]}
 
 
-def _locked(fn):
+JOBS: dict[str, dict] = {}
+
+
+def start_job(kind: str, fn) -> str:
+    """Run a long harness step (minutes) in the background; the dashboard polls /jobs/{id} and watches events."""
+    job_id = f"job-{uuid.uuid4().hex[:8]}"
+    JOBS[job_id] = {"id": job_id, "kind": kind, "status": "running", "started_at": datetime.now(timezone.utc).isoformat(),
+                    "result": None, "error": None}
+
+    def run():
+        try:
+            JOBS[job_id]["result"] = fn()
+            JOBS[job_id]["status"] = "done"
+        except Exception as e:  # noqa: BLE001 — surface to the dashboard instead of dying silently
+            JOBS[job_id]["status"], JOBS[job_id]["error"] = "error", f"{type(e).__name__}: {e}"
+        finally:
+            JOBS[job_id]["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+    threading.Thread(target=run, daemon=True, name=job_id).start()
+    return job_id
+
+
+def _start_locked(kind: str, fn) -> dict:
     if not STEP_LOCK.acquire(blocking=False):
         raise HTTPException(409, "an evolve/immune step is already running")
-    try:
-        return fn(db)
-    finally:
-        STEP_LOCK.release()
+
+    def guarded():
+        try:
+            return fn(db)
+        finally:
+            STEP_LOCK.release()
+
+    return {"job_id": start_job(kind, guarded), "status": "running"}
 
 
-@app.post("/evolve/step")
+@app.post("/evolve/step", status_code=202, dependencies=[Depends(require_token)])
 def evolve_step() -> dict:
     from harness.evolve import step
-    return _locked(step)
+    return _start_locked("evolve", step)
 
 
-@app.post("/immune/step")
+@app.post("/immune/step", status_code=202, dependencies=[Depends(require_token)])
 def immune_step() -> dict:
     from harness.immune import mint
-    return _locked(mint)
+    return _start_locked("immune", mint)
+
+
+@app.get("/jobs/{job_id}")
+def job_status(job_id: str) -> dict:
+    if job_id not in JOBS:
+        raise HTTPException(404, f"unknown job {job_id}")
+    return JSON_SAFE(JOBS[job_id])
+
+
+def JSON_SAFE(obj):
+    import json
+    return json.loads(json.dumps(obj, default=str))

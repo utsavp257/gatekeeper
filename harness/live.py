@@ -60,6 +60,18 @@ class AgentInstance:
                                                        "antibodies": len(new["policy"].get("antibodies") or [])}})
                 print(f"[{self.name}] hot-swapped {old} → {new['_id']} ({latency_ms} ms)", flush=True)
 
+    def heartbeat(self, every_s: float = 10.0) -> None:
+        """Keeps agents.last_heartbeat fresh so the dashboard can show liveness (not just the last swap)."""
+        import time as _time
+        while True:
+            try:
+                self.db.agents.update_one({"_id": self.name}, {"$set": {"genome_id": self.current()["_id"],
+                                                                       "last_heartbeat": datetime.now(timezone.utc)}})
+            except Exception as e:  # noqa: BLE001
+                print(f"[{self.name}] heartbeat error: {e}", flush=True)
+            _time.sleep(every_s)
+
     def start(self) -> "AgentInstance":
         threading.Thread(target=self.watch, daemon=True, name=f"watch-{self.name}").start()
+        threading.Thread(target=self.heartbeat, daemon=True, name=f"heartbeat-{self.name}").start()
         return self

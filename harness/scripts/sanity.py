@@ -3,6 +3,7 @@
   uv run python -m harness.scripts.sanity --hotswap  # also proves change-stream hot-swap with a throwaway genome
 """
 import json
+import os
 import subprocess
 import sys
 import time
@@ -11,7 +12,7 @@ from datetime import datetime, timezone
 
 from harness.db import get_db, ping
 
-API = "http://localhost:8000"
+API = os.environ.get("HARNESS_PUBLIC_URL_FOR_SANITY", "http://localhost:8000")
 ok_all = True
 
 
@@ -23,12 +24,14 @@ def check(name: str, cond: bool, detail: str = "") -> None:
 
 def call(path: str, body: dict | None = None, timeout: int = 180) -> dict:
     req = urllib.request.Request(API + path, data=json.dumps(body).encode() if body is not None else None,
-                                 headers={"Content-Type": "application/json"}, method="POST" if body is not None else "GET")
+                                 headers={"Content-Type": "application/json",
+                                          "x-harness-token": os.environ.get("HARNESS_API_TOKEN", "")},
+                                 method="POST" if body is not None else "GET")
     return json.load(urllib.request.urlopen(req, timeout=timeout))
 
 
 def main() -> None:
-    db = get_db()
+    db = get_db()  # loads .env (HARNESS_API_TOKEN, API base) as a side effect
     ping()
     check("Atlas reachable", True)
     t = subprocess.run(["uv", "run", "pytest", "-q"], capture_output=True, text=True)
