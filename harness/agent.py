@@ -1,9 +1,11 @@
+import hashlib
 import os
 import time
 import uuid
 from datetime import datetime, timezone
 
 from strands import Agent
+from strands.tools.executors import SequentialToolExecutor
 from strands.models.openai import OpenAIModel
 from tavily import TavilyClient
 
@@ -36,10 +38,10 @@ def make_model(model_id: str | None = None) -> tuple[OpenAIModel, str]:
 
 def _prompt(case: dict, justification: str | None = None) -> str:
     v, r = case["vendor"], case["request"]
-    lines = [f"Vendor onboarding request {case['_id']}:", f"- Vendor legal name: {v['name']}",
+    # No case id or LEI in the prompt: both correlate with the label (audit M3). Tools resolve the LEI internally.
+    ref = hashlib.sha1(case["_id"].encode()).hexdigest()[:8]
+    lines = [f"Vendor onboarding request REQ-{ref}:", f"- Vendor legal name: {v['name']}",
              f"- Country: {v.get('country') or 'unknown'}"]
-    if v.get("lei"):
-        lines.append(f"- LEI: {v['lei']}")
     if v.get("website"):
         lines.append(f"- Website: {v['website']}")
     lines += [f"- Purchase order: ${r['amount_usd']:,} — {justification if justification is not None else r['justification']}", "Investigate and decide."]
@@ -52,7 +54,8 @@ def run_case(db, case: dict, genome: dict, agent_instance: str = "agent-a", mode
     model, mid = make_model(model_id)
     tavily = TavilyClient(os.environ.get("TAVILY_API_KEY") or load_settings().tavily_api_key)
     agent = Agent(model=model, tools=build_tools(db, state, tavily), hooks=[GatekeeperHooks(state)],
-                  system_prompt=SYSTEM_PROMPT, callback_handler=None)
+                  system_prompt=SYSTEM_PROMPT, callback_handler=None,
+                  tool_executor=SequentialToolExecutor())  # no check-then-act races between tool calls
     t0, error, nudged = time.time(), None, False
     try:
         # the requester's justification is untrusted input too: antibodies run before the model reads it

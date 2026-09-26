@@ -2,6 +2,7 @@
 
   uv run uvicorn harness.server:app --port 8000
 """
+import threading
 import uuid
 from datetime import datetime, timezone
 
@@ -19,6 +20,7 @@ app = FastAPI(title="Gatekeeper harness")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 db = get_db()
 AGENTS: dict[str, AgentInstance] = {}
+STEP_LOCK = threading.Lock()  # one evolve/immune step at a time (version numbers, promotions)
 
 
 @app.on_event("startup")
@@ -68,9 +70,10 @@ def screen(body: ScreenBody) -> dict:
     agent = _agent(body.agent_instance)
     case = {"_id": f"live-{uuid.uuid4().hex[:8]}", "split": "live", "attack_type": "live",
             "vendor": body.vendor.model_dump(), "request": body.request.model_dump()}
-    r = run_case(db, case, agent.current(), body.agent_instance, run_id="live")
+    genome = agent.current()
+    r = run_case(db, case, genome, body.agent_instance, run_id="live")
     return {"decision": r["decision"], "memo": r["memo"], "trace_id": r["trace_id"], "blocked": r["blocked"],
-            "genome_id": agent.current()["_id"], "cost_usd": r["cost_usd"]}
+            "genome_id": genome["_id"], "cost_usd": r["cost_usd"]}
 
 
 @app.post("/redteam/attack")
@@ -92,13 +95,22 @@ def attack(body: AttackBody) -> dict:
             "genome_id": agent.current()["_id"], "trace_id": r["trace_id"]}
 
 
+def _locked(fn):
+    if not STEP_LOCK.acquire(blocking=False):
+        raise HTTPException(409, "an evolve/immune step is already running")
+    try:
+        return fn(db)
+    finally:
+        STEP_LOCK.release()
+
+
 @app.post("/evolve/step")
 def evolve_step() -> dict:
     from harness.evolve import step
-    return step(db)
+    return _locked(step)
 
 
 @app.post("/immune/step")
 def immune_step() -> dict:
     from harness.immune import mint
-    return mint(db)
+    return _locked(mint)

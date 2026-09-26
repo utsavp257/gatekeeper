@@ -10,7 +10,7 @@ from openai import OpenAI
 
 from harness.config import load_settings
 from harness.data.search_indexes import GENOME_VECTOR_INDEX, ensure_search_index
-from harness.eval import evaluate
+from harness.eval import evaluate, matching_runs, mean_metrics
 from harness.genomes import champion as get_champion
 from harness.policy import set_path
 
@@ -211,11 +211,26 @@ def _event(db, kind: str, genome_id: str, payload: dict) -> None:
                           "genome_id": genome_id, "payload": payload})
 
 
+HELDOUT_RUNS = 2  # held-out is small (25 cases); gate on the mean of repeated runs, not one noisy run (audit C1)
+
+
+def comparable_scores(db, genome_id: str) -> dict:
+    """Champion scores over the CURRENT case set + model, re-evaluating when stale (audit C2)."""
+    train = matching_runs(db, genome_id, "train") or [evaluate(db, genome_id, "train")]
+    held = matching_runs(db, genome_id, "heldout")
+    while len(held) < HELDOUT_RUNS:
+        held.append(evaluate(db, genome_id, "heldout"))
+    return {"train": mean_metrics([r["metrics"] for r in train]), "heldout": mean_metrics([r["metrics"] for r in held])}
+
+
+def _heldout_mean(db, genome_id: str) -> dict:
+    return mean_metrics([evaluate(db, genome_id, "heldout")["metrics"] for _ in range(HELDOUT_RUNS)])
+
+
 def step(db) -> dict:
     champ = get_champion(db)
-    run = _latest_run(db, champ["_id"], "train") or evaluate(db, champ["_id"], "train")
-    if not _latest_run(db, champ["_id"], "heldout"):
-        evaluate(db, champ["_id"], "heldout")
+    champ_scores = comparable_scores(db, champ["_id"])
+    run = sorted(matching_runs(db, champ["_id"], "train"), key=lambda r: r["finished_at"])[-1]
     champ = db.genomes.find_one({"_id": champ["_id"]})
     proposal, raw = propose(db, champ, run)
     version = (db.genomes.find_one(sort=[("version", -1)]) or {"version": 0})["version"] + 1
@@ -232,22 +247,25 @@ def step(db) -> dict:
     if errors:
         return _finish(db, doc, False, "invalid diff: " + "; ".join(errors))
     cand_train = evaluate(db, cid, "train")["metrics"]
-    ok, reason = gate(champ["scores"], cand_train, None)
+    ok, reason = gate(champ_scores, cand_train, None)
     if ok:
-        cand_held = evaluate(db, cid, "heldout")["metrics"]
-        ok, reason = gate(champ["scores"], cand_train, cand_held)
+        ok, reason = gate(champ_scores, cand_train, _heldout_mean(db, cid))
+    result = _finish(db, doc, ok, reason)  # new champion is set BEFORE the old one is retired (audit H3)
     if ok:
         db.genomes.update_one({"_id": champ["_id"]}, {"$set": {"status": "retired"}})
-        for a in ("agent-a", "agent-b"):
-            db.agents.update_one({"_id": a}, {"$set": {"genome_id": cid}}, upsert=True)
-    return _finish(db, doc, ok, reason)
+    return result
 
 
 def _finish(db, doc: dict, promoted: bool, reason: str) -> dict:
     status = "champion" if promoted else "rejected"
-    emb = _embed([f"{doc['rationale']} | diff {json.dumps(doc['diff'])} | outcome {status}: {reason}"])[0]
-    db.genomes.update_one({"_id": doc["_id"]}, {"$set": {"status": status, "gate_reason": reason, "embedding": emb,
-                                                        "decided_at": datetime.now(timezone.utc)}})
+    try:
+        emb = _embed([f"{doc['rationale']} | diff {json.dumps(doc['diff'], default=str)} | outcome {status}: {reason}"])[0]
+    except Exception:  # memory is best-effort; never let it block a status transition
+        emb = None
+    fields = {"status": status, "gate_reason": reason, "decided_at": datetime.now(timezone.utc)}
+    if emb:
+        fields["embedding"] = emb
+    db.genomes.update_one({"_id": doc["_id"]}, {"$set": fields})
     _event(db, "promotion" if promoted else "rejection", doc["_id"],
            {"candidate": doc["_id"], "parent": doc["parent"], "reason": reason, "rationale": doc["rationale"]})
     g = db.genomes.find_one({"_id": doc["_id"]}, {"scores": 1})

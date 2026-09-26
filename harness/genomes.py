@@ -22,4 +22,9 @@ def get_genome(db, gid: str) -> dict:
 
 
 def champion(db) -> dict:
-    return db.genomes.find_one({"status": "champion"}, sort=[("version", -1)]) or ensure_baseline(db)
+    g = db.genomes.find_one({"status": "champion"}, sort=[("version", -1)])
+    if g:
+        return g
+    if db.genomes.count_documents({"_id": {"$regex": "^g-"}}):
+        raise RuntimeError("no champion genome — refusing to silently fall back to the baseline")
+    return ensure_baseline(db)

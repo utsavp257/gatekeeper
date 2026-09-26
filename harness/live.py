@@ -28,9 +28,22 @@ class AgentInstance:
             return self.genome
 
     def watch(self) -> None:
+        """Resumes from the last token after network blips instead of dying silently (audit M5)."""
+        import time as _time
+        while True:
+            try:
+                self._watch_once()
+            except Exception as e:  # noqa: BLE001 — keep the immune link alive
+                print(f"[{self.name}] change stream error, resuming: {type(e).__name__}: {e}", flush=True)
+                _time.sleep(2)
+
+    _token = None
+
+    def _watch_once(self) -> None:
         pipeline = [{"$match": {"operationType": {"$in": ["insert", "update", "replace"]}}}]
-        with self.db.genomes.watch(pipeline, full_document="updateLookup") as stream:
+        with self.db.genomes.watch(pipeline, full_document="updateLookup", resume_after=self._token) as stream:
             for event in stream:
+                self._token = event["_id"]
                 new = champion_from_change(event, self.genome["_id"])
                 if not new:
                     continue

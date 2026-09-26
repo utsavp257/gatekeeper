@@ -38,36 +38,43 @@ def build_tools(db, state: CaseState, tavily):
     def screen_name(name: str) -> str:
         """Screen a company name against US sanctions and export-control lists (OFAC SDN, BIS Entity List, UFLPA, ...).
         Returns the closest listed parties with a similarity score (0-1). name: the vendor's exact legal name."""
-        text = {"query": name, "path": policy["screening"]["fields"]}
+        text = {"path": policy["screening"]["fields"]}
         if policy["screening"]["fuzzy_max_edits"]:
             text["fuzzy"] = {"maxEdits": policy["screening"]["fuzzy_max_edits"]}
         proj = {"name": 1, "alt_names": 1, "source_list": 1, "programs": 1, "country": 1}
-        hits = list(db.screening_list.aggregate([{"$search": {"index": "screening_names", "text": text}}, {"$limit": 25},
-                                                 {"$project": proj}]))
-        hits += list(db.screening_list.find({"name_norm": normalize_name(name)}, proj).limit(5))  # exact, never ranked out
+
+        def candidates(q: str) -> list[dict]:
+            t = dict(text, query=q)
+            found = list(db.screening_list.aggregate([{"$search": {"index": "screening_names", "text": t}},
+                                                      {"$limit": 25}, {"$project": proj}]))
+            return found + list(db.screening_list.find({"name_norm": normalize_name(q)}, proj).limit(5))
+
+        hits = candidates(name)
         scored = rank_screening_hits(name, hits)
-        if name_similarity(name, vendor["name"]) >= 0.9:
-            state.checks_done.add("screen_name")
-            if scored and scored[0]["similarity"] > state.best_screen:
-                state.best_screen = scored[0]["similarity"]
-                state.best_screen_hit = {"_id": scored[0]["id"], "name": scored[0]["name"]}
+        # Enforcement evidence never depends on the model's query: the harness screens the vendor's actual name.
+        vendor_hits = hits if normalize_name(name) == normalize_name(vendor["name"]) else hits + candidates(vendor["name"])
+        vendor_scored = rank_screening_hits(vendor["name"], vendor_hits)
+        state.checks_done.add("screen_name")
+        if vendor_scored and vendor_scored[0]["similarity"] > state.best_screen:
+            state.best_screen = vendor_scored[0]["similarity"]
+            state.best_screen_hit = {"_id": vendor_scored[0]["id"], "name": vendor_scored[0]["name"]}
         return json.dumps({"query": name, "matches": scored[:3]} if scored else {"query": name, "matches": []})
 
     @tool
     def check_ownership(name: str = "", lei: str = "") -> str:
         """Look up the vendor in the global LEI registry (GLEIF) and walk its parent companies, reporting any parent
         that is on a sanctions list. name: vendor legal name. lei: the vendor's LEI if known."""
-        ent = db.entities.find_one({"_id": lei}) if lei else None
+        # The harness resolves the VENDOR's own entity; model-supplied name/lei are logged but cannot redirect the walk.
+        ent = db.entities.find_one({"_id": vendor["lei"]}) if vendor.get("lei") else None
         if not ent:
             cands = list(db.entities.aggregate([
-                {"$search": {"index": "entity_names", "text": {"query": name, "path": ["display_name", "legal_name",
-                                                                                         "other_names"]}}},
+                {"$search": {"index": "entity_names", "text": {"query": vendor["name"], "path": ["display_name", "legal_name",
+                                                                                                 "other_names"]}}},
                 {"$limit": 3}]))
-            ent = next((c for c in cands if max(name_similarity(name, c["display_name"]),
-                                                 name_similarity(name, c["legal_name"])) >= 0.85), None)
-        if name_similarity(name, vendor["name"]) >= 0.9 or (lei and lei == vendor.get("lei")):
-            state.checks_done.add("check_ownership")
+            ent = next((c for c in cands if max(name_similarity(vendor["name"], c["display_name"]),
+                                                 name_similarity(vendor["name"], c["legal_name"])) >= 0.85), None)
         if not ent:
+            state.checks_done.add("check_ownership")
             return json.dumps({"found": False, "note": "Not found in LEI registry; no ownership data."})
         depth = depth_for(policy, ent.get("country"))
         chain = list(db.ownership_edges.aggregate([
@@ -88,6 +95,7 @@ def build_tools(db, state: CaseState, tavily):
                                                                        "list": listed["source_list"]}})
             if listed and (state.listed_ancestor_depth is None or d < state.listed_ancestor_depth):
                 state.listed_ancestor_depth, state.listed_ancestor = d, {"_id": listed["_id"], "name": listed["name"]}
+        state.checks_done.add("check_ownership")
         return json.dumps({"found": True, "entity": {"lei": ent["_id"], "name": ent["display_name"],
                                                      "country": ent["country"]},
                            "depth_checked": depth, "ancestors": out})

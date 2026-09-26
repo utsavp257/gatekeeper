@@ -5,7 +5,8 @@ from datetime import datetime, timezone
 
 from harness.antibodies import chunks, cosine, embed_cached
 from harness.eval import evaluate
-from harness.evolve import _finish, _latest_run, gate
+from harness.eval import matching_runs
+from harness.evolve import _finish, _heldout_mean, comparable_scores, gate
 from harness.genomes import champion as get_champion
 
 
@@ -26,14 +27,19 @@ def calibrate_threshold(sig: list[float], benign_vecs: list[list[float]], margin
 
 def mint(db) -> dict:
     champ = get_champion(db)
-    run = _latest_run(db, champ["_id"], "train") or evaluate(db, champ["_id"], "train")
+    champ_scores = comparable_scores(db, champ["_id"])  # re-evaluates if the case set changed (e.g. injections added)
+    run = sorted(matching_runs(db, champ["_id"], "train"), key=lambda r: r["finished_at"])[-1]
     got_through = [c for c in run["per_case"] if c["attack_type"] == "injection" and c["decision"] == "approve"]
     if not got_through:
         return {"minted": 0, "reason": "no train injection got through"}
 
     benign_texts = [p for c in db.cases.find({"split": "train", "attack_type": {"$ne": "injection"}})
                     for p in chunks(c["request"]["justification"])]
-    benign_vecs = embed_cached(db, sorted(set(benign_texts)))
+    # untrusted web text is scanned too, so calibrate against real (benign) web snippets as well (audit M4)
+    for w in db.web_cache.find({"_id": {"$not": {"$regex": "^extract:"}}}).limit(60):
+        for r in (w.get("response") or {}).get("results", [])[:2]:
+            benign_texts += chunks(r.get("content", ""))[:3]
+    benign_vecs = embed_cached(db, sorted(set(t for t in benign_texts if t)))
     benign_c = centroid(benign_vecs)
 
     existing = champ["policy"].get("antibodies") or []
@@ -66,17 +72,13 @@ def mint(db) -> dict:
         db.events.insert_one({"ts": datetime.now(timezone.utc), "type": "antibody", "agent_instance": None,
                               "genome_id": cid, "payload": {k: a[k] for k in ("id", "signature_text", "similarity_threshold",
                                                                               "source_case")}})
-    champ = db.genomes.find_one({"_id": champ["_id"]})
     cand_train = evaluate(db, cid, "train")["metrics"]
-    ok, reason = gate(champ["scores"], cand_train, None)
+    ok, reason = gate(champ_scores, cand_train, None)
     if ok:
-        cand_held = evaluate(db, cid, "heldout")["metrics"]
-        ok, reason = gate(champ["scores"], cand_train, cand_held)
+        ok, reason = gate(champ_scores, cand_train, _heldout_mean(db, cid))
+    result = _finish(db, doc, ok, reason)
     if ok:
         db.genomes.update_one({"_id": champ["_id"]}, {"$set": {"status": "retired"}})
-        for agent in ("agent-a", "agent-b"):
-            db.agents.update_one({"_id": agent}, {"$set": {"genome_id": cid}}, upsert=True)
-    result = _finish(db, doc, ok, reason)
     result["minted"] = len(new)
     result["antibodies"] = [(a["id"], a["signature_text"][:80], a["similarity_threshold"]) for a in new]
     return result
