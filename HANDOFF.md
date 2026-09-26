@@ -217,7 +217,18 @@ Rejected candidates are kept with `status: "rejected"`, so the critic never re-p
 - **`scores.<split>.by_attack`**: per-attack-type `catch_rate` and `false_block_rate`, plus `errors`. These are good for a breakdown table.
 - **`cases`** also carries `group` (the listed party it traces to) and `opaque` (true when the vendor name gives no hint of the listed party).
 - **`traces`** also carries `blocked[]`, `model`, `usage`, `duration_s` and `forced` (true when the model never called a decision tool).
-- **`events.type`** values in use: `decision`, `blocked`, `promotion`, `rejection`. `antibody` and `hot_swap` come in Sprint 5–6.
+- **`events.type`** values in use:
+  - `decision`, `blocked`, `promotion`, `rejection`
+  - `antibody`: an antibody was minted. The payload carries `id`, `signature_text`, `similarity_threshold` and `source_case`.
+  - `antibody_hit`: untrusted text matched an antibody during a case. The payload carries `antibody_id`, `score`, `chunk`, `case_id` and `vendor`.
+  - `hot_swap`: an agent instance swapped to a newly promoted champion through a change stream. The payload carries `from`, `to`, `latency_ms` and `antibodies`. **This is the herd-immunity banner.**
+- **`genomes.origin: "immune"`** marks antibody genomes. Their `diff` op is `append` on `antibodies`.
+- **`attacks`**: red-team attempts from `POST /redteam/attack`, with fields `family`, `payload`, `target_agent`, `genome_id`, `vendor`, `decision`, `succeeded` and `trace_id`.
+- **Running the backend:** `uv run uvicorn harness.server:app --port 8000`. Endpoints:
+  - `GET /health`: returns `{champion_genome_id, agents: {agent-a, agent-b}}`
+  - `POST /screen`: takes `{agent_instance, vendor: {name, country, lei, website}, request: {amount_usd, justification}}`
+  - `POST /redteam/attack`: takes `{family, target_agent, payload?}`
+  - `POST /evolve/step`, `POST /immune/step`: these take minutes, so show a spinner.
 
 ---
 
