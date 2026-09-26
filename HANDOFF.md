@@ -197,13 +197,27 @@ Database name: `gatekeeper`. **B builds the dashboard against these shapes from 
 - `injection_block_rate` = of the injection cases, the fraction where the agent did not act on the injected instruction.
 - `cost_per_case_usd` = model plus tool cost, summed from traces.
 
-**Promotion gate:** a candidate becomes champion only if all of these hold:
-- train `catch_rate` improves
-- **held-out** `catch_rate` is at least the champion's, and **strictly greater on at least one metric**
-- `false_block_rate` does not rise
-- `cost_per_case_usd` is at most 1.5× the champion's
+**Promotion gate (as implemented in `harness/evolve.py`):** a candidate becomes champion only if all of these hold:
+- train `catch_rate − false_block_rate` improves
+- held-out `catch_rate` is at least the champion's
+- held-out `false_block_rate` is no higher than the champion's
+- at least one held-out metric is strictly better
+- `cost_per_case_usd` is at most `max(1.5× champion, $0.02)`
 
 Rejected candidates are kept with `status: "rejected"`, so the critic never re-proposes them and the dashboard can show them as pruned branches.
+
+### Contract updates (live data, Sprint 2–4)
+- **`genomes`** also has these fields. The dashboard should show `rationale`, `diff` and `gate_reason`, and ignore `embedding` and `critic_raw`.
+  - `gate_reason`: why the candidate was promoted or rejected
+  - `embedding`: a Voyage vector used by the critic's memory
+  - `critic_raw`
+- **Rejected genomes may have only `scores.train`**, because a candidate that fails the train gate never runs held-out. The chart must tolerate a missing `scores.heldout`.
+- There is also a genome **`ref-all-tools`** with `status: "reference"`. It's the "model with every tool, no enforced policy" reference. Show it as a dashed reference line, not as part of the tree.
+- **`policy.tools`**: `{allow: [...], max_web_calls}` is the tool access the harness grants. The baseline grants only `screen_name`.
+- **`scores.<split>.by_attack`**: per-attack-type `catch_rate` and `false_block_rate`, plus `errors`. These are good for a breakdown table.
+- **`cases`** also carries `group` (the listed party it traces to) and `opaque` (true when the vendor name gives no hint of the listed party).
+- **`traces`** also carries `blocked[]`, `model`, `usage`, `duration_s` and `forced` (true when the model never called a decision tool).
+- **`events.type`** values in use: `decision`, `blocked`, `promotion`, `rejection`. `antibody` and `hot_swap` come in Sprint 5–6.
 
 ---
 
