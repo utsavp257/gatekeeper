@@ -14,7 +14,8 @@ def ensure_search_index(collection, model: dict, timeout_s: int = 180) -> None:
     if model["name"] in existing:
         collection.update_search_index(model["name"], model["definition"])
     else:
-        collection.create_search_index(SearchIndexModel(definition=model["definition"], name=model["name"]))
+        collection.create_search_index(SearchIndexModel(definition=model["definition"], name=model["name"],
+                                                         type=model.get("type", "search")))
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         idx = next(iter(collection.list_search_indexes(model["name"])), None)
@@ -22,3 +23,6 @@ def ensure_search_index(collection, model: dict, timeout_s: int = 180) -> None:
             return
         time.sleep(3)
     raise TimeoutError(f"search index {model['name']} not queryable after {timeout_s}s")
+GENOME_VECTOR_INDEX = {"name": "genome_vectors", "type": "vectorSearch", "definition": {"fields": [
+    {"type": "vector", "path": "embedding", "numDimensions": 1024, "similarity": "cosine"},
+    {"type": "filter", "path": "status"}]}}
