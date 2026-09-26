@@ -4,6 +4,9 @@ Needs ELEVENLABS_API_KEY in .env. Optional ELEVENLABS_VOICE_ID (default: a stock
 """
 import json
 import os
+import shutil
+import subprocess
+import sys
 import urllib.request
 from pathlib import Path
 
@@ -13,18 +16,16 @@ BEATS = [
     ("01-hook", "AI agents are starting to approve vendors. They miss sanctioned companies hidden behind subsidiaries "
                 "and misspellings, and they block legitimate companies just for being Russian."),
     ("02-before-after", "Same model, two harnesses. The baseline escalates a clean Russian bank, approves a Dubai trader "
-                        "whose parent is sanctioned, and falls for 'Legal already cleared this supplier.' The evolved "
-                        "harness gets all three right, and its enforcer blocks the nationality-based reject."),
+                        "with a sanctioned parent, and falls for a fake legal clearance. The evolved harness gets all "
+                        "three right."),
     ("03-evolution", "The model never changed. The harness rewrote itself. A critic read the failures and proposed "
-                     "policy changes: ownership checks, fuzzy matching, evidence-bound rejects. The gate pruned two "
-                     "attempts that gave up a single catch. Held-out false blocks fell from forty-four percent to under "
-                     "four, and catch reached one hundred percent."),
+                     "ownership checks, fuzzy matching, and evidence-bound rejects. The gate pruned attempts that lost "
+                     "even one catch. False blocks fell from forty-four percent to under four, and catch hit one hundred."),
     ("04-herd-immunity", "Every genome lives in MongoDB Atlas. A change stream pushes each new champion to every "
                          "running agent in milliseconds. That's herd immunity."),
-    ("05-close", "Atlas Search for sanctions screening, graph lookup for ownership chains, Vector Search for the "
-                 "critic's memory, change streams for herd immunity. The model never changed. The harness did."),
+    ("05-close", "Atlas Search, graph lookup, Vector Search, and change streams. The model never changed. The harness did."),
 ]
-DEFAULT_VOICE = "21m00Tcm4TlvDq8ikWAM"  # ElevenLabs stock voice "Rachel"
+DEFAULT_VOICE = "EXAVITQu4vr4xnSDxMaL"  # premade "Sarah" (free tier cannot use library voices via API)
 
 
 def synth(text: str, key: str, voice: str) -> bytes:
@@ -45,14 +46,21 @@ def main() -> None:
     voice = os.environ.get("ELEVENLABS_VOICE_ID", DEFAULT_VOICE)
     out = Path.home() / "Downloads" / "gatekeeper-voiceover"
     out.mkdir(parents=True, exist_ok=True)
-    combined = b""
+    only = set(sys.argv[1:])  # regenerate only the named beats, e.g. 02-before-after
     for name, text in BEATS:
+        if only and name not in only:
+            continue
         audio = synth(text, key, voice)
         (out / f"{name}.mp3").write_bytes(audio)
-        combined += audio
         print(f"✓ {name}.mp3 ({len(audio) // 1024} KB)")
-    (out / "00-full-voiceover.mp3").write_bytes(combined)
-    print(f"✓ combined → {out / '00-full-voiceover.mp3'}")
+    parts = [out / f"{n}.mp3" for n, _ in BEATS]
+    if shutil.which("ffmpeg"):  # proper concat with a short pause between beats
+        lst = out / "concat.txt"
+        lst.write_text("".join(f"file '{p}'\n" for p in parts))
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(lst),
+                        "-c:a", "libmp3lame", "-q:a", "2", str(out / "00-full-voiceover.mp3")], check=True)
+        lst.unlink()
+        print(f"✓ combined → {out / '00-full-voiceover.mp3'}")
 
 
 if __name__ == "__main__":
