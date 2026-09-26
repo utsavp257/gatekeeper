@@ -21,7 +21,9 @@ The data is real: 16,610 US-listed parties from the Consolidated Screening List,
 - **Catch:** 87% → **100%**
 - **Legitimate vendors wrongly blocked:** 44% → **3.7%**
 - **Injection catch:** 80% → **100%**
-- **Cost:** about $0.02 per vendor check Everything runs in the Atlas Hackathon Sandbox.
+- **Cost:** about $0.02 per vendor check
+
+Everything runs in the Atlas Hackathon Sandbox.
 
 Stack: MongoDB Atlas (Search, Vector Search, change streams, `$graphLookup`), Strands Agents, OpenRouter (Qwen3-235B agent, Claude Sonnet 5 critic), Voyage AI, Tavily, FastAPI, Next.js on Vercel.
 
@@ -30,7 +32,7 @@ Stack: MongoDB Atlas (Search, Vector Search, change streams, `$graphLookup`), St
 | Time | Screen | Voiceover |
 |---|---|---|
 | 0–8s | Title + one example vendor | "AI agents approve vendors now. Sanctioned companies hide behind name variants and subsidiaries, and naive agents over-block whole countries." |
-| 8–20s | Baseline `g-0001` screens **Renaissance Capital** (clean, Russian) → *reject*, then **an opaque subsidiary of a listed bank** → *approve* | "Our baseline, name screening only, gets both wrong: it blocks half the legitimate vendors and lets hidden subsidiaries through." |
+| 8–20s | Baseline `g-0001` screens **Renaissance Capital** (clean, Russian) → *reject*, then **an opaque subsidiary of a listed bank** → *approve* | "Our baseline, name screening only, gets both wrong: it blocks almost half the legitimate vendors and lets hidden subsidiaries through." |
 | 20–38s | Dashboard version tree: g-0001 → rejected g-0002/g-0003 (grey) → g-0004 → g-0005, with the chart. Click g-0004 to show its diff. | "Same model, and the harness rewrites itself. The critic proposed ownership checks, fuzzy matching and evidence-bound rejects. The gate pruned two attempts that traded away a single catch. Held-out false blocks fell from 44% to about 4%, and catch reached 100%." |
 | 38–52s | Live ops split screen: promote the champion, and the **hot_swap banner** shows agent-a 170 ms, agent-b 250 ms. Re-screen the subsidiary on agent-b → *reject*, blocked_by `policy.ownership.block_if_listed_ancestor_within`. | "Every improvement lives in MongoDB Atlas. A change stream pushes it to every running agent in about 200 milliseconds." |
 | 52–60s | Architecture strip: Atlas Search · `$graphLookup` · Vector Search · change streams | "The model never changed. The harness did, and it's all in Atlas." |
