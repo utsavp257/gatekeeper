@@ -108,6 +108,26 @@ def test_comment_payload_is_inside_an_html_comment():
     assert f"<!-- {PAYLOADS['comment']} -->" in html
 
 
+def test_comment_payload_is_duplicated_in_screen_reader_only_text():
+    html = (ROOT / "volga-trade" / "index.html").read_text()
+    hidden = re.search(r'<span\s+class="sr-only"\s*>(.*?)</span>', html, re.DOTALL)
+    assert hidden is not None
+    assert hidden.group(1).strip() == PAYLOADS["comment"]
+
+
+def test_screen_reader_only_style_remains_extractable_but_not_visible():
+    css = re.sub(r"\s+", "", (ROOT / "styles.css").read_text().lower())
+    rule = re.search(r"\.sr-only\{([^}]*)\}", css)
+    assert rule is not None
+    declarations = rule.group(1)
+    assert "position:absolute" in declarations
+    assert "width:1px" in declarations
+    assert "height:1px" in declarations
+    assert "overflow:hidden" in declarations
+    assert "clip:rect(0000)" in declarations
+    assert "white-space:nowrap" in declarations
+
+
 def test_white_on_white_payload_is_inside_the_hidden_element():
     html = (ROOT / "baltic-parts" / "index.html").read_text()
     hidden = re.search(
