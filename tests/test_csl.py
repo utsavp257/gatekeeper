@@ -35,3 +35,8 @@ def test_same_row_id_on_two_lists_gets_distinct_ids():
     a = parse_csl_row(dict(ROW, source="Specially Designated Nationals (SDN) - Treasury Department"))
     b = parse_csl_row(dict(ROW, source="Sectoral Sanctions Identifications List (SSI) - Treasury Department"))
     assert a["_id"] != b["_id"]
+
+
+def test_keeps_entity_type():
+    assert parse_csl_row(ROW)["type"] == "Entity"
+    assert parse_csl_row(dict(ROW, type=""))["type"] == ""

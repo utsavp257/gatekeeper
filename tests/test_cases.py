@@ -55,3 +55,13 @@ def test_heldout_groups_disjoint_from_train():
 
 def test_deterministic():
     assert build_cases(*_fixture())[0] == build_cases(*_fixture())[0]
+
+
+def test_variant_keeps_distinctive_tokens():
+    rng = random.Random(3)
+    name = "JOINT STOCK COMPANY COMMERCIAL BANK URAL FD"
+    base = normalize_name(name).split()
+    for v in name_variants(name, {normalize_name(name)}, rng, k=5):
+        vt = normalize_name(v).split()
+        changed = [t for t in base if t not in vt]
+        assert len(changed) == 1, (v, changed)  # exactly one token perturbed, rest intact

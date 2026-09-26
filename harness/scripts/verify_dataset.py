@@ -9,15 +9,18 @@ def main() -> None:
     for c in ("screening_list", "entities", "ownership_edges", "cases", "case_labels"):
         print(f"{c}: {db[c].count_documents({})}")
     print(Counter((c["split"], c["attack_type"]) for c in db.cases.find()))
-    v = db.cases.find_one({"attack_type": "name_variant"})
-    label = db.case_labels.find_one({"case_id": v["_id"]})
-    hits = list(db.screening_list.aggregate([
-        {"$search": {"index": "screening_names", "compound": {"should": [
-            {"text": {"query": v["vendor"]["name"], "path": ["name", "alt_names"], "fuzzy": {"maxEdits": 2}}}]}}},
-        {"$limit": 3}, {"$project": {"name": 1, "score": {"$meta": "searchScore"}}}]))
-    print(f"variant {v['vendor']['name']!r} (listed: {label['evidence']['original']!r}) → top hits:")
-    for h in hits:
-        print(f"   {h['score']:.2f}  {h['name']}")
+    found = 0
+    variants = list(db.cases.find({"attack_type": "name_variant"}))
+    for v in variants:
+        label = db.case_labels.find_one({"case_id": v["_id"]})
+        hits = list(db.screening_list.aggregate([
+            {"$search": {"index": "screening_names", "text": {
+                "query": v["vendor"]["name"], "path": ["name", "alt_names"], "fuzzy": {"maxEdits": 2}}}},
+            {"$limit": 3}, {"$project": {"name": 1}}]))
+        ok = label["evidence"]["listed_id"] in {h["_id"] for h in hits}
+        found += ok
+        print(f"  {'✓' if ok else '✗'} {v['vendor']['name']!r} ← {label['evidence']['original']!r}")
+    print(f"name variants recoverable by fuzzy search (top-3): {found}/{len(variants)}")
     kid = db.cases.find_one({"attack_type": "indirect_ownership"})
     chain = list(db.ownership_edges.aggregate([
         {"$match": {"child_lei": kid["vendor"]["lei"]}},

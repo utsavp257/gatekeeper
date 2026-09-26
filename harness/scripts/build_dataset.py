@@ -65,7 +65,7 @@ def main() -> None:
         print("cases exist — keeping locked held-out set (pass --rebuild-cases to regenerate)")
     else:
         rng_clean = sorted(clean, key=lambda e: e["_id"])
-        cases, labels = build_cases(listed + list(db.screening_list.find({"leis": [], "country": {"$ne": None}}).limit(400)),
+        cases, labels = build_cases(listed + list(db.screening_list.find({"leis": [], "country": {"$ne": None}, "type": "Entity"}).limit(400)),
                                     children, grandchildren, rng_clean)
         db.cases.drop()
         db.case_labels.drop()

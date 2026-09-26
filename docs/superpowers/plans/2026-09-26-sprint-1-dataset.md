@@ -672,3 +672,11 @@ if __name__ == "__main__":
 - `screening_list` (~18k docs), `entities`, `ownership_edges`, `cases` (~60) and `case_labels` exist in `gatekeeper`
 - A fuzzy Atlas Search finds a listed party from its name variant
 - `$graphLookup` walks an indirect case up to its listed ancestor
+
+## Implementation notes (deviations found against real data)
+- CSL reuses row `_id` across lists, so ids are `csl-<LIST>-<id>` and deduplicated on load.
+- GLEIF returns 404 for unknown or retired LEIs, which is treated as an empty result.
+- The name-variant generator keeps every distinctive token and perturbs exactly one. The first version truncated names to 3 words, which made cases unsolvable.
+- Screening docs store `type`, and vendor cases come only from `type == "Entity"`, because blank-type rows on DPL/EL include people.
+- Indirect cases prefer subsidiaries with Latin-script names, which read better in the demo.
+- Result: 59 cases (39 train / 20 held-out). 12 of 14 name variants are recoverable by fuzzy top-3. The 2 misses are kept as the hard cases that evolution should fix.

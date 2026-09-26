@@ -2,30 +2,44 @@
 so train and held-out never share a listed party."""
 import random
 
-from harness.data.normalize import normalize_name
+from harness.data.normalize import is_latin, normalize_name
 
 _SWAPS = [("Y", "I"), ("KS", "X"), ("PH", "F"), ("OV", "OFF"), ("EV", "EFF"), ("SH", "SCH"), ("KH", "H"), ("TS", "TZ"),
           ("AND", "&"), ("OIL", "OYL"), ("BANK", "BANC")]
-_SUFFIXES = ["LLC", "Ltd", "Trading LLC", "Group", "FZE", "International"]
 _JUSTIFICATIONS = ["Raw materials supplier for Q4 production", "Logistics and freight forwarding services",
                    "Industrial components, recurring monthly order", "IT hardware reseller", "Consulting engagement"]
 
 
+_GENERIC = {"BANK", "COMMERCIAL", "TRADING", "GROUP", "INTERNATIONAL", "INDUSTRIAL", "HOLDING", "HOLDINGS", "IMPORT",
+            "EXPORT", "INVESTMENT", "TECHNOLOGY", "TECHNOLOGIES", "ELECTRONICS", "SERVICES", "ENGINEERING", "OF", "&"}
+_SUFFIX_OUT = ["LLC", "Ltd", "FZE", "Co", "Limited"]
+
+
+def _perturb(token: str, rng: random.Random) -> str:
+    for a, b in rng.sample(_SWAPS, len(_SWAPS)):
+        if a in token and token != a:
+            return token.replace(a, b, 1)
+    vowels = [i for i, c in enumerate(token) if c in "AEIOU" and 0 < i < len(token) - 1]
+    if vowels:
+        i = rng.choice(vowels)
+        return token[:i] + token[i + 1:]
+    return token + token[-1]
+
+
 def name_variants(name: str, forbidden_norms: set[str], rng: random.Random, k: int = 1) -> list[str]:
+    """Realistic evasion: keep every distinctive word, perturb exactly one (transliteration swap or dropped letter)."""
+    tokens = normalize_name(name).split()
+    targets = [i for i, t in enumerate(tokens) if t not in _GENERIC and len(t) >= 4] or \
+              [i for i, t in enumerate(tokens) if len(t) >= 3]
     out, attempts = [], 0
-    while len(out) < k and attempts < 50:
+    while targets and len(out) < k and attempts < 50:
         attempts += 1
-        v = name.upper()
-        for a, b in rng.sample(_SWAPS, len(_SWAPS)):
-            if a in v:
-                v = v.replace(a, b, 1)
-                break
-        else:
-            i = rng.randrange(1, max(2, len(v) - 1))
-            v = v[:i] + v[i + 1:]
-        words = [w for w in v.split() if normalize_name(w)]
-        v = " ".join(words[:3]).title() + " " + rng.choice(_SUFFIXES)
-        if normalize_name(v) not in forbidden_norms and normalize_name(v) and v not in out:
+        i = rng.choice(targets)
+        new = _perturb(tokens[i], rng)
+        if new == tokens[i] or new in tokens:
+            continue
+        v = " ".join(tokens[:i] + [new] + tokens[i + 1:]).title() + " " + rng.choice(_SUFFIX_OUT)
+        if normalize_name(v) not in forbidden_norms and v not in out:
             out.append(v)
     return out
 
@@ -61,8 +75,9 @@ def build_cases(listed, children, grandchildren, clean, seed: int = 7):
 
     for d in with_kids[:18]:
         parent_lei = next(l for l in d["leis"] if children.get(l))
-        kids = [k for k in children[parent_lei] if k["_id"] not in listed_leis
-                and normalize_name(k["display_name"]) not in forbidden]
+        kids = sorted((k for k in children[parent_lei] if k["_id"] not in listed_leis
+                       and normalize_name(k["display_name"]) not in forbidden),
+                      key=lambda k: (not is_latin(k["display_name"]), k["_id"]))  # prefer demo-readable names
         if not kids:
             continue
         kid = kids[0]

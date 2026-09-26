@@ -25,6 +25,7 @@ def parse_csl_row(row: dict) -> dict | None:
     return {
         "_id": f"csl-{source_list}-{row['_id']}",
         "source_list": source_list,
+        "type": row.get("type", ""),
         "name": row["name"],
         "name_norm": normalize_name(row["name"]),
         "alt_names": _split(row.get("alt_names", "")),
