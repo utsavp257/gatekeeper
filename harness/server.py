@@ -43,6 +43,7 @@ class Request(BaseModel):
 
 class ScreenBody(BaseModel):
     agent_instance: str = "agent-a"
+    genome_id: str | None = None  # optional override, e.g. screen with the baseline g-0001 for a before/after demo
     vendor: Vendor
     request: Request = Request()
 
@@ -71,6 +72,10 @@ def screen(body: ScreenBody) -> dict:
     case = {"_id": f"live-{uuid.uuid4().hex[:8]}", "split": "live", "attack_type": "live",
             "vendor": body.vendor.model_dump(), "request": body.request.model_dump()}
     genome = agent.current()
+    if body.genome_id:
+        genome = db.genomes.find_one({"_id": body.genome_id})
+        if not genome:
+            raise HTTPException(404, f"unknown genome {body.genome_id}")
     r = run_case(db, case, genome, body.agent_instance, run_id="live")
     return {"decision": r["decision"], "memo": r["memo"], "trace_id": r["trace_id"], "blocked": r["blocked"],
             "genome_id": genome["_id"], "cost_usd": r["cost_usd"]}

@@ -226,7 +226,7 @@ Rejected candidates are kept with `status: "rejected"`, so the critic never re-p
 - **`attacks`**: red-team attempts from `POST /redteam/attack`, with fields `family`, `payload`, `target_agent`, `genome_id`, `vendor`, `decision`, `succeeded` and `trace_id`.
 - **Running the backend:** `uv run uvicorn harness.server:app --port 8000`. Endpoints:
   - `GET /health`: returns `{champion_genome_id, agents: {agent-a, agent-b}}`
-  - `POST /screen`: takes `{agent_instance, vendor: {name, country, lei, website}, request: {amount_usd, justification}}`
+  - `POST /screen`: takes `{agent_instance, genome_id?, vendor: {name, country, lei, website}, request: {amount_usd, justification}}`. `genome_id` screens with a specific genome, e.g. `g-0001` for the before/after demo.
   - `POST /redteam/attack`: takes `{family, target_agent, payload?}`
   - `POST /evolve/step`, `POST /immune/step`: these take minutes, so show a spinner.
 
